@@ -48,16 +48,25 @@ def calcular_totales(items_meli):
     
     return items_procesados, neto, iva, total
 
-def facturar_orden_nueva(session, client, afip, orden_real, datos_fiscales):
-    """Mapea, guarda en DB, pide CAE y genera el PDF de una orden nueva."""
-    datos_mapeados = map_meli_to_order(orden_real, datos_fiscales)
-    meli_id = datos_mapeados['meli_order_id']
+    # 1. Determinar tipo de envío
+    # En MELI 'fulfillment' suele ser FULL. 'MADRYN' puede ser un tag o shipping_option
+    shipping = orden_real.get('shipping', {})
+    shipping_mode = shipping.get('mode', 'me2')
+    tags = orden_real.get('tags', [])
     
-    # 1. Guardar la orden en la base de datos
+    stype = "NORMAL"
+    if "fulfillment" in tags or shipping_mode == "fulfillment":
+        stype = "FULL"
+    elif "madryn" in str(orden_real).lower(): # Búsqueda genérica por ahora
+        stype = "MADRYN"
+
+    # 2. Guardar la orden en la base de datos (como PENDIENTE)
     nueva_orden = Orden(
         client_name=datos_mapeados['client_name'],
         total_amount=datos_mapeados['total_amount'],
-        meli_order_id=meli_id
+        meli_order_id=meli_id,
+        shipping_type=stype,
+        status="PENDIENTE"
     )
     session.add(nueva_orden)
     session.flush() # Guardamos temporalmente para obtener el ID
@@ -85,22 +94,30 @@ def facturar_orden_nueva(session, client, afip, orden_real, datos_fiscales):
             condicion_iva = "IVA RESPONSABLE INSCRIPTO"
 
     # 4. Pedir CAE al Simulador AFIP
-    payload_afip = {
-        "client_name": nueva_orden.client_name,
-        "total_amount": nueva_orden.total_amount,
-        "punto_venta": 14,
-        "tipo_cbte": int(cod) 
-    }
-    respuesta_afip = afip.emitir_factura(payload_afip)
-    
-    # 5. Guardar la factura en la base de datos
-    factura_db = Factura(
-        orden_id=nueva_orden.id,
-        cae=respuesta_afip["CAE"],
-        cae_expiration=respuesta_afip["CAEFchVto"]
-    )
-    session.add(factura_db)
-    session.commit()
+    try:
+        payload_afip = {
+            "client_name": nueva_orden.client_name,
+            "total_amount": nueva_orden.total_amount,
+            "punto_venta": 14,
+            "tipo_cbte": int(cod) 
+        }
+        respuesta_afip = afip.emitir_factura(payload_afip)
+        
+        # 5. Guardar la factura en la base de datos
+        factura_db = Factura(
+            orden_id=nueva_orden.id,
+            cae=respuesta_afip["CAE"],
+            cae_expiration=respuesta_afip["CAEFchVto"]
+        )
+        session.add(factura_db)
+        nueva_orden.status = "FACTURADA"
+        session.commit()
+    except Exception as e:
+        print(f"❌ Error AFIP en orden {meli_id}: {e}")
+        nueva_orden.status = "ERROR"
+        nueva_orden.error_message = str(e)
+        session.commit()
+        return # Frenamos aquí
     
     # 6. Preparar datos para el PDF
     raw = factura_db.cae_expiration

@@ -1,14 +1,17 @@
-from flask import Flask, render_template, jsonify
+from flask import Flask, render_template, jsonify, send_from_directory
 from API.meli_client import MeliClient
+from PoC_AFIP.database import SessionLocal, Orden, Factura
 import os
+from pathlib import Path
 
 app = Flask(__name__)
 
 # Configuración
 HOST = '192.168.1.29'
 PORT = 5001
+PDF_DIR = Path(__file__).parent / "PoC_AFIP"
 
-# Inicializar clientes (esto se podría mover a un gestor de estados más adelante)
+# Inicializar clientes
 meli = MeliClient()
 
 @app.route('/')
@@ -17,33 +20,54 @@ def index():
 
 @app.route('/api/stats')
 def get_stats():
-    # Mock de datos por ahora, integrando con MeliClient
+    session = SessionLocal()
     try:
-        # Intentamos obtener info básica de MELI
+        # 1. Info de MeLi
         meli_user = meli.get_my_user_id()
-        meli_status = "Online" if meli_user else "Offline"
         
+        # 2. Resumen de ventas de la DB
+        todas = session.query(Orden).all()
+        
+        # 3. Filtrar ventas por tipo y estado
+        ventas_list = []
+        for o in todas:
+            # Determinar color y estado visual
+            color = "#f87171" # Red (Error)
+            if o.status == "FACTURADA":
+                color = "#4ade80" # Green (Success)
+            elif o.status == "PENDIENTE":
+                color = "#fbbf24" # Yellow (Pending)
+
+            ventas_list.append({
+                "id": o.meli_order_id,
+                "cliente": o.client_name,
+                "monto": f"$ {o.total_amount:,.2f}",
+                "tipo": o.shipping_type, # FULL / MADRYN / NORMAL
+                "status": o.status,
+                "color": color,
+                "has_pdf": o.status == "FACTURADA",
+                "pdf_url": f"/api/pdf/factura_B_{o.meli_order_id}.pdf" if o.status == "FACTURADA" else None
+            })
+
         stats = {
             "meli": {
-                "status": meli_status,
+                "status": "Online" if meli_user else "Offline",
                 "user": meli_user.get('nickname') if meli_user else "N/A",
-                "sales_today": 12, # Mock
-                "pending": 3
+                "sales_count": len(todas)
             },
-            "tiendanube": {
-                "status": "Configurando",
-                "sales_today": 5,
-                "pending": 1
-            },
-            "system": {
-                "last_sync": "Hace 5 minutos",
-                "cpu_usage": "12%"
-            }
+            "ventas": ventas_list[::-1][:10] # Últimas 10
         }
         return jsonify(stats)
     except Exception as e:
+        print(f"Error stats: {e}")
         return jsonify({"error": str(e)}), 500
+    finally:
+        session.close()
+
+@app.route('/api/pdf/<filename>')
+def get_pdf(filename):
+    return send_from_directory(PDF_DIR, filename)
 
 if __name__ == '__main__':
-    print(f"🚀 Iniciando Dashboard en http://{HOST}:{PORT}")
+    print(f"🚀 Iniciando Dashboard Pro en http://{HOST}:{PORT}")
     app.run(host=HOST, port=PORT, debug=True)
