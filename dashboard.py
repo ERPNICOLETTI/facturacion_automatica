@@ -105,8 +105,17 @@ def get_stats():
         session.close()
 
 @app.route('/api/pdf/<filename>')
-def get_pdf(filename):
-    return send_from_directory(PDF_DIR, filename)
+def serve_pdf(filename):
+    # Buscamos el archivo recursivamente en la carpeta FACTURAS
+    base_path = PDF_DIR / "FACTURAS"
+    for path in base_path.rglob(filename):
+        return send_from_directory(path.parent, path.name)
+    
+    # Por compatibilidad (si quedó alguno afuera)
+    if (PDF_DIR / filename).exists():
+        return send_from_directory(PDF_DIR, filename)
+        
+    return f"Archivo {filename} no encontrado", 404
 
 if __name__ == '__main__':
     init_db()  # Crear las tablas si no existen

@@ -10,6 +10,15 @@ DATABASE_PATH = BASE_DIR / "mock_database.db"
 DATABASE_URL = f"sqlite:///{DATABASE_PATH}"
 
 engine = create_engine(DATABASE_URL, echo=False)
+
+# Optimización para acceso simultáneo (Bot + Dashboard)
+from sqlalchemy import event
+@event.listens_for(engine, "connect")
+def set_sqlite_pragma(dbapi_connection, connection_record):
+    cursor = dbapi_connection.cursor()
+    cursor.execute("PRAGMA journal_mode=WAL")
+    cursor.close()
+
 Base = declarative_base()
 SessionLocal = sessionmaker(bind=engine)
 

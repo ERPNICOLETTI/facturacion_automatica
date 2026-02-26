@@ -136,10 +136,18 @@ def facturar_existente(session, client, afip, orden_db):
         "created_at": datetime.now().strftime("%d/%m/%Y %H:%M"),
     }
     
-    # 7. Generar y guardar el PDF
-    output_path = Path(__file__).parent / "PoC_AFIP" / f"factura_{letra}_{meli_id}.pdf"
+    # 7. Generar y guardar el PDF en carpeta organizada por año/mes
+    ahora_dt = datetime.now()
+    anio = ahora_dt.strftime("%Y")
+    mes = ahora_dt.strftime("%m")
+    
+    # Ruta: PoC_AFIP/FACTURAS/2026/02/factura_B_123.pdf
+    folder_path = Path(__file__).parent / "PoC_AFIP" / "FACTURAS" / anio / mes
+    folder_path.mkdir(parents=True, exist_ok=True)
+    
+    output_path = folder_path / f"factura_{letra}_{meli_id}.pdf"
     generar_pdf(factura_data, output_path=output_path)
-    print(f"✅ ¡ÉXITO! Factura {letra} generada: {output_path.name}")
+    print(f"✅ ¡ÉXITO! Factura {letra} generada: {output_path.relative_to(Path(__file__).parent)}")
 
 def emitir_nota_credito(session, client, afip, orden_db):
     """Genera una Nota de Crédito para una orden cancelada/devuelta."""
@@ -178,9 +186,15 @@ def emitir_nota_credito(session, client, afip, orden_db):
         orden_db.status_afip_nc = "NC_EMITIDA"
         session.commit()
         
-        # 3. Generar PDF de la Nota de Crédito
-        # (Reutilizamos la lógica del PDF pero cambiamos el título)
-        # Aquí llamaríamos a una función similar a facturar_existente pero con título "NOTA DE CRÉDITO"
+        # 3. Generar PDF de la Nota de Crédito en carpeta organizada
+        ahora_dt = datetime.now()
+        anio = ahora_dt.strftime("%Y")
+        mes = ahora_dt.strftime("%m")
+        folder_path = Path(__file__).parent / "PoC_AFIP" / "FACTURAS" / anio / mes
+        folder_path.mkdir(parents=True, exist_ok=True)
+        
+        # Guardaríamos el PDF de la NC (lógica similar a la factura)
+        # Por ahora lo registramos en logs
         print(f"✅ ¡ÉXITO! Nota de Crédito emitida: CAE {res_nc['CAE']}")
         
     except Exception as e:
