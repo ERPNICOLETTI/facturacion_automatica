@@ -8,6 +8,8 @@ from pathlib import Path
 
 from API.meli_client import MeliClient
 from API.mapper import map_meli_to_order
+from API.tn_client import TNClient
+from API.mapper_tn import map_tn_to_order
 from PoC_AFIP.database import SessionLocal, Orden, Factura, init_db
 from PoC_AFIP.simulador_afip import SimuladorAFIP
 from PoC_AFIP.generador_pdf import generar_pdf
@@ -17,26 +19,21 @@ from PoC_AFIP.generador_pdf import generar_pdf
 MINUTOS_REVISION = 15
 # ──────────────────────────────────────────────────────────────────────────────
 
-def calcular_totales(items_meli):
-    """Calcula subtotales e IVA a partir de los ítems de Mercado Libre"""
+def calcular_totales(items_list):
+    """Calcula subtotales e IVA a partir de una lista de ítems mapeada uniformemente."""
     items_procesados = []
     subtotal_gravado = 0.0
     
-    for item in items_meli:
-        prod = item.get('item', {})
-        precio = float(item.get('unit_price', 0))
-        cantidad = int(item.get('quantity', 1))
+    for item in items_list:
+        precio = float(item.get('precio_unitario', 0))
+        cantidad = int(item.get('cantidad', 1))
         
         subtotal = round(precio * cantidad, 2)
         subtotal_gravado += subtotal
         
-        # 🔍 NUEVO: Buscamos primero el SKU oficial. 
-        # Si por algún motivo no lo cargaste en MeLi, cae al custom_field o al ID de publicación.
-        sku_real = prod.get('seller_sku') or prod.get('seller_custom_field') or prod.get('id', 'S/C')
-        
         items_procesados.append({
-            "codigo": sku_real,
-            "descripcion": prod.get('title', 'Producto sin nombre'),
+            "codigo": item.get('codigo', 'S/C'),
+            "descripcion": item.get('descripcion', 'Producto'),
             "cantidad": cantidad,
             "precio_unitario": precio,
             "bonificacion": 0.0,
@@ -49,40 +46,48 @@ def calcular_totales(items_meli):
     
     return items_procesados, neto, iva, total
 
-def facturar_existente(session, client, afip, orden_db):
+def facturar_existente(session, meli_client, tn_client, afip, orden_db):
     """Procesa una orden que ya está en la DB pero sigue PENDIENTE."""
-    meli_id = orden_db.meli_order_id
-    print(f"📄 Procesando facturación para Orden {meli_id}...")
+    ext_id = orden_db.meli_order_id or orden_db.tn_order_id
+    print(f"📄 Procesando facturación para Orden {orden_db.source} {ext_id}...")
     
-    # Traemos la orden real y sus datos fiscales (V2)
-    orden_real = client.get_order_details(meli_id)
-    datos_fiscales = client.get_billing_info(meli_id)
-    
-    if not orden_real:
-        print(f"⚠️ No se pudo obtener info de la orden {meli_id}")
-        return
-
-    # 2. Calcular importes
-    items_calc, subtotal_neto, iva_contenido, total = calcular_totales(orden_real.get('order_items', []))
-    
-    # 3. Determinar dinámicamente si es Factura A o B
+    items_mapeados = []
+    dni_cuit = "-"
+    condicion_iva = "CONSUMIDOR FINAL"
     letra = "B"
     cod = "06"
-    condicion_iva = "CONSUMIDOR FINAL"
-    dni_cuit = "-"
-    
-    if datos_fiscales and datos_fiscales.get('billing_info'):
-        b_info = datos_fiscales['billing_info']
-        doc_type = b_info.get('identification', {}).get('type', '')
-        doc_num = b_info.get('identification', {}).get('number', '')
-        dni_cuit = f"{doc_type} {doc_num}"
+    address = "Envío"
+
+    if orden_db.source == "MELI":
+        details = meli_client.get_order_details(ext_id)
+        fiscal = meli_client.get_billing_info(ext_id)
+        mapeo = map_meli_to_order(details, fiscal) if details else None
+        if not mapeo: return
+        items_mapeados = mapeo['items']
+        address = "Mercado Libre - Envío"
         
-        # Revisamos si es Responsable Inscripto y pasó CUIT
-        tax_desc = b_info.get('taxes', {}).get('taxpayer_type', {}).get('description', '') or b_info.get('taxpayer_type', {}).get('description', '')
-        if "Inscripto" in tax_desc and doc_type == "CUIT":
-            letra = "A"
-            cod = "01"
-            condicion_iva = "IVA RESPONSABLE INSCRIPTO"
+        if fiscal and fiscal.get('billing_info'):
+            b_info = fiscal['billing_info']
+            doc_type = b_info.get('identification', {}).get('type', '')
+            doc_num = b_info.get('identification', {}).get('number', '')
+            dni_cuit = f"{doc_type} {doc_num}"
+            tax_desc = b_info.get('taxes', {}).get('taxpayer_type', {}).get('description', '') or b_info.get('taxpayer_type', {}).get('description', '')
+            if "Inscripto" in tax_desc and doc_type == "CUIT":
+                letra, cod, condicion_iva = "A", "01", "IVA RESPONSABLE INSCRIPTO"
+    else:
+        details = tn_client.get_order(ext_id)
+        mapeo = map_tn_to_order(details) if details else None
+        if not mapeo: return
+        items_mapeados = mapeo['items']
+        dni_cuit = mapeo.get('client_dni', '-')
+        address = "Tiendanube - Despacho"
+        # TN no suele dar condición de IVA directa, asumimos B/CF a menos que detectemos CUIT largo
+        if len(dni_cuit.replace("-","")) > 10:
+             # Heurística mínima o podrías pedirle al simulador que decida
+             pass
+
+    # 2. Calcular importes final para el PDF
+    items_calc, subtotal_neto, iva_contenido, total = calcular_totales(items_mapeados)
 
     # 4. Pedir CAE al Simulador AFIP
     try:
@@ -105,13 +110,14 @@ def facturar_existente(session, client, afip, orden_db):
         orden_db.status = "FACTURADA"
         session.commit()
     except Exception as e:
-        print(f"❌ Error AFIP en orden {meli_id}: {e}")
+        print(f"❌ Error AFIP en orden {ext_id}: {e}")
         orden_db.status = "ERROR"
         orden_db.error_message = str(e)
         session.commit()
         return
     
     # 6. Preparar datos para el PDF
+    ahora_dt = datetime.now()
     raw = factura_db.cae_expiration
     cae_exp_legible = f"{raw[6:8]}/{raw[4:6]}/{raw[0:4]}" if len(raw) == 8 else raw
     nro_factura = f"Nº00014-{str(factura_db.id).zfill(8)}"
@@ -121,13 +127,13 @@ def facturar_existente(session, client, afip, orden_db):
         "letra_factura": letra,
         "nro_factura": nro_factura,
         "client_name": orden_db.client_name,
-        "client_address": "Mercado Libre - Envío",
+        "client_address": address,
         "client_dni": dni_cuit, 
-        "client_email": "-",
+        "client_email": mapeo.get('client_email', '-'),
         "client_condicion": condicion_iva,
-        "condicion_venta": "MercadoPago",
+        "condicion_venta": mapeo.get('payment_method', 'Online'),
         "tipo_venta": "Producto",
-        "orden_compra": str(meli_id),
+        "orden_compra": str(ext_id),
         "pages": [{"items": items_calc, "page_num": 1, "total_pages": 1, "is_last": True}],
         "subtotal_gravado": f"$ {subtotal_neto:,.2f}".replace(",", "X").replace(".", ",").replace("X", "."),
         "total": f"$ {total:,.2f}".replace(",", "X").replace(".", ",").replace("X", "."),
@@ -138,7 +144,6 @@ def facturar_existente(session, client, afip, orden_db):
     }
     
     # 7. Generar y guardar el PDF en carpeta organizada por año/mes
-    ahora_dt = datetime.now()
     anio = ahora_dt.strftime("%Y")
     mes = ahora_dt.strftime("%m")
     
@@ -146,21 +151,21 @@ def facturar_existente(session, client, afip, orden_db):
     folder_path = Path(__file__).parent / "PoC_AFIP" / "FACTURAS" / anio / mes
     folder_path.mkdir(parents=True, exist_ok=True)
     
-    output_path = folder_path / f"factura_{letra}_{meli_id}.pdf"
+    output_path = folder_path / f"factura_{letra}_{orden_db.source}_{ext_id}.pdf"
     generar_pdf(factura_data, output_path=output_path)
-    print(f"✅ ¡ÉXITO! Factura {letra} generada: {output_path.relative_to(Path(__file__).parent)}")
+    print(f"✅ ¡ÉXITO! Factura {letra} generada ({orden_db.source}): {output_path.relative_to(Path(__file__).parent)}")
 
-def emitir_nota_credito(session, client, afip, orden_db):
+def emitir_nota_credito(session, meli_client, tn_client, afip, orden_db):
     """Genera una Nota de Crédito para una orden cancelada/devuelta."""
     if orden_db.status_afip_nc == "NC_EMITIDA": return
     
-    meli_id = orden_db.meli_order_id
-    print(f"📉 Emitiendo NOTA DE CRÉDITO para Orden {meli_id} (Cancelada/Devuelta)...")
+    ext_id = orden_db.meli_order_id or orden_db.tn_order_id
+    print(f"📉 Emitiendo NOTA DE CRÉDITO para {orden_db.source} {ext_id} (Cancelada/Devuelta)...")
     
     # 1. Buscar la factura original para referenciarla
     factura_orig = orden_db.factura
     if not factura_orig:
-        print(f"⚠️ No hay factura original para la orden {meli_id}. Nada que anular.")
+        print(f"⚠️ No hay factura original para la orden {ext_id}. Nada que anular.")
         orden_db.status_afip_nc = "NC_OMITIDA" # No hay nada que anular
         session.commit()
         return
@@ -169,7 +174,7 @@ def emitir_nota_credito(session, client, afip, orden_db):
     letra_orig = factura_orig.letra # Recuperamos si fue A o B
     tipo_nc = 3 if letra_orig == "A" else 8 # 3 = NC A, 8 = NC B
     
-    print(f"📉 Emitiendo NOTA DE CRÉDITO {letra_orig} para Orden {meli_id}...")
+    print(f"📉 Emitiendo NOTA DE CRÉDITO {letra_orig} para {orden_db.source} {ext_id}...")
 
     try:
         payload_nc = {
@@ -195,8 +200,15 @@ def emitir_nota_credito(session, client, afip, orden_db):
         folder_path.mkdir(parents=True, exist_ok=True)
         
         # Necesitamos la info detallada para el PDF de la NC (items, etc.)
-        orden_real = client.get_order_details(meli_id)
-        items_calc, subtotal_neto, iva_contenido, total = calcular_totales(orden_real.get('order_items', []) if orden_real else [])
+        items_calc = []
+        if orden_db.source == "MELI":
+            detalles = meli_client.get_order_details(ext_id)
+            mapeo = map_meli_to_order(detalles) if detalles else None
+            items_calc, subtotal_neto, iva_contenido, total = calcular_totales(mapeo['items'] if mapeo else [])
+        else:
+            detalles = tn_client.get_order(ext_id)
+            mapeo = map_tn_to_order(detalles) if detalles else None
+            items_calc, subtotal_neto, iva_contenido, total = calcular_totales(mapeo['items'] if mapeo else [])
         
         raw_vto = res_nc['CAEFchVto']
         vto_legible = f"{raw_vto[6:8]}/{raw_vto[4:6]}/{raw_vto[0:4]}" if len(raw_vto) == 8 else raw_vto
@@ -210,9 +222,9 @@ def emitir_nota_credito(session, client, afip, orden_db):
             "client_dni": "-", 
             "client_email": "-",
             "client_condicion": "CONSUMIDOR FINAL" if letra_orig == "B" else "RESPONSABLE INSCRIPTO",
-            "condicion_venta": "MercadoPago",
+            "payment_method": "Online",
             "tipo_venta": "Anulación",
-            "orden_compra": str(meli_id),
+            "orden_compra": str(ext_id),
             "pages": [{"items": items_calc, "page_num": 1, "total_pages": 1, "is_last": True}],
             "subtotal_gravado": f"$ {subtotal_neto:,.2f}".replace(",", "X").replace(".", ",").replace("X", "."),
             "total": f"$ {total:,.2f}".replace(",", "X").replace(".", ",").replace("X", "."),
@@ -222,16 +234,46 @@ def emitir_nota_credito(session, client, afip, orden_db):
             "created_at": ahora_dt.strftime("%d/%m/%Y %H:%M"),
         }
         
-        output_path = folder_path / f"nc_{letra_orig}_{meli_id}.pdf"
+        output_path = folder_path / f"nc_{letra_orig}_{orden_db.source}_{ext_id}.pdf"
         generar_pdf(factura_data, output_path=output_path)
-        print(f"✅ ¡ÉXITO! Nota de Crédito {letra_orig} generada: {output_path.relative_to(Path(__file__).parent)}")
+        print(f"✅ ¡ÉXITO! Nota de Crédito {letra_orig} generada ({orden_db.source}): {output_path.relative_to(Path(__file__).parent)}")
         
     except Exception as e:
-        print(f"❌ Error al emitir NC para {meli_id}: {e}")
+        print(f"❌ Error al emitir NC para {orden_db.source} {ext_id}: {e}")
         orden_db.status_afip_nc = "PENDIENTE"
         session.commit()
 
-def facturar_orden_nueva(session, client, afip, orden_real, datos_fiscales):
+def facturar_orden_tn(session, tn_client, afip, tn_order):
+    """Mapea una orden de Tiendanube y la procesa."""
+    mapeo = map_tn_to_order(tn_order)
+    tn_id = mapeo['tn_order_id']
+
+    print(f"🚀 Tiendanube {tn_id} detectada. Cliente: {mapeo['client_name']}")
+
+    nueva_orden = Orden(
+        source="TN",
+        client_name=mapeo['client_name'],
+        total_amount=mapeo['total_amount'],
+        tn_order_id=tn_id,
+        shipping_type="NORMAL",
+        status="PENDIENTE",
+        meli_status=tn_order.get('status', 'open'), # Mapeamos status de TN aquí
+        amount_paid=mapeo['total_amount'], # En TN solemos asumir pago total si está cerrada/paid
+        amount_refunded=0.0,
+        is_refunded=0
+    )
+    session.add(nueva_orden)
+    session.flush() 
+
+    # En TN, usualmente facturamos si el pago está confirmado
+    p_status = tn_order.get('payment_status', 'pending')
+    if p_status == "paid":
+        facturar_existente(session, None, tn_client, afip, nueva_orden)
+    else:
+        print(f"⏩ Saltando facturación para TN {tn_id} (Pago: {p_status})")
+        session.commit()
+
+def facturar_orden_meli(session, meli_client, afip, orden_real, datos_fiscales):
     """Mapea, guarda en DB (como pendiente) y luego llama a facturar_existente."""
     datos_mapeados = map_meli_to_order(orden_real, datos_fiscales)
     meli_id = datos_mapeados['meli_order_id']
@@ -245,7 +287,7 @@ def facturar_orden_nueva(session, client, afip, orden_real, datos_fiscales):
 
     # Si en la orden no viene el tipo de logística, lo buscamos en el shipment (API externa)
     if not logistic_type and shipping_id:
-        shipment = client.get_shipment_details(shipping_id)
+        shipment = meli_client.get_shipment_details(shipping_id)
         if shipment:
             # En x-format-new puede venir en la raíz o dentro de un objeto 'logistic'
             logistic_obj = shipment.get('logistic', {})
@@ -266,6 +308,7 @@ def facturar_orden_nueva(session, client, afip, orden_real, datos_fiscales):
     total_refunded = sum(p.get('transaction_amount_refunded', 0) for p in payments)
 
     nueva_orden = Orden(
+        source="MELI",
         client_name=datos_mapeados['client_name'],
         total_amount=datos_mapeados['total_amount'],
         meli_order_id=meli_id,
@@ -281,11 +324,11 @@ def facturar_orden_nueva(session, client, afip, orden_real, datos_fiscales):
     
     # Solo facturar si está pagada y no cancelada (y no reembolsada totalmente)
     if nueva_orden.meli_status == "paid" and total_refunded < nueva_orden.total_amount:
-        facturar_existente(session, client, afip, nueva_orden)
+        facturar_existente(session, meli_client, None, afip, nueva_orden)
     elif total_refunded >= nueva_orden.total_amount:
         print(f"⏩ Venta {meli_id} está TOTALMENTE REEMBOLSADA. Marcando como NC directa.")
         nueva_orden.status = "FACTURADA" # Simulamos que pasó por facturada para poder hacer la NC
-        emitir_nota_credito(session, client, afip, nueva_orden)
+        emitir_nota_credito(session, meli_client, None, afip, nueva_orden)
     else:
         print(f"⏩ Saltando facturación para {meli_id} (Estado: {nueva_orden.meli_status})")
         session.commit()
@@ -294,11 +337,12 @@ def facturar_orden_nueva(session, client, afip, orden_real, datos_fiscales):
 def ejecutar_bot():
     """Bucle infinito que revisa y factura."""
     init_db()
-    client = MeliClient()
+    meli_client = MeliClient()
+    tn_client = TNClient()
     afip = SimuladorAFIP()
     
     print("\n" + "="*60)
-    print("🤖 BOT FACTURADOR PINO S.A. INICIADO")
+    print("🤖 BOT FACTURADOR MULTI-PLATAFORMA (MeLi + TN)")
     print("El sistema está corriendo. Presioná Ctrl+C para detenerlo.")
     print("="*60)
     
@@ -310,33 +354,31 @@ def ejecutar_bot():
             # 1. Facturar órdenes que estén PENDIENTES en la base de datos (Ej: las del Dashboard)
             pendientes = session.query(Orden).filter_by(status="PENDIENTE").all()
             if pendientes:
-                print(f"\n[{ahora}] 🔍 Encontradas {len(pendientes)} órdenes pendientes de facturación.")
+                print(f"\n[{ahora}] 🔍 Encontradas {len(pendientes)} órdenes pendientes.")
                 for p in pendientes:
-                    facturar_existente(session, client, afip, p)
+                    facturar_existente(session, meli_client, tn_client, afip, p)
             
-            # 2. Buscar ventas nuevas directamente en MeLi (Últimas 48hs para asegurar)
-            user_data = client.get_my_user_id()
-            if user_data:
-                my_id = user_data.get('id')
+            # 2. Buscar ventas nuevas en Mercado Libre
+            user_meli = meli_client.get_my_user_id()
+            if user_meli:
+                my_id_meli = user_meli.get('id')
                 fecha_limit = (datetime.now() - dt_lib.timedelta(days=1)).strftime('%Y-%m-%dT%H:%M:%S.000-00:00')
+                search_url = f"{meli_client.api_url}/orders/search?seller={my_id_meli}&order.date_created.from={fecha_limit}&limit=50&sort=date_desc"
+                ventas_meli = meli_client._make_request("GET", search_url)
                 
-                # Traer más resultados (limit 50) y filtrar por fecha de creación reciente
-                search_url = f"{client.api_url}/orders/search?seller={my_id}&order.date_created.from={fecha_limit}&limit=50&sort=date_desc"
-                ventas = client._make_request("GET", search_url)
-                
-                if ventas and ventas.get('results'):
-                    print(f"[{ahora}] 🔍 MeLi devolvió {len(ventas['results'])} órdenes de las últimas 24hs.")
-                    for v in ventas['results']:
+                if ventas_meli and ventas_meli.get('results'):
+                    print(f"[{ahora}] 🔍 MeLi devolvió {len(ventas_meli['results'])} órdenes.")
+                    for v in ventas_meli['results']:
                         order_id = str(v['id'])
                         m_status = v.get('status', 'paid')
                         
                         existente = session.query(Orden).filter_by(meli_order_id=order_id).first()
                         if not existente:
                             print(f"✨ Nueva venta detectada: {order_id} (Status: {m_status})")
-                            orden_real = client.get_order_details(order_id)
-                            fiscal = client.get_billing_info(order_id)
+                            orden_real = meli_client.get_order_details(order_id)
+                            fiscal = meli_client.get_billing_info(order_id)
                             if orden_real:
-                                facturar_orden_nueva(session, client, afip, orden_real, fiscal)
+                                facturar_orden_meli(session, meli_client, afip, orden_real, fiscal)
                         else:
                             # Sincronizar status y montos (REEMBOLSOS "AL CENTAVO")
                             dirty = False
@@ -345,7 +387,7 @@ def ejecutar_bot():
                                 dirty = True
                             
                             # Revisamos si hubo reembolsos nuevos
-                            orden_detallada = client.get_order_details(order_id)
+                            orden_detallada = meli_client.get_order_details(order_id)
                             if orden_detallada:
                                 payments = orden_detallada.get('payments', [])
                                 total_refunded = sum(p.get('transaction_amount_refunded', 0) for p in payments)
@@ -358,12 +400,39 @@ def ejecutar_bot():
                                     
                                     # Si el reembolso es total o parcial y estaba facturada, NC automática
                                     if total_refunded > 0 and existente.status == "FACTURADA" and existente.status_afip_nc == "N/A":
-                                        emitir_nota_credito(session, client, afip, existente)
+                                        emitir_nota_credito(session, meli_client, tn_client, afip, existente)
                             
                             if dirty:
                                 session.commit()
                 else:
-                    print(f"[{ahora}] No se encontraron ventas en las últimas 48hs.")
+                    print(f"[{ahora}] No se encontraron ventas en las últimas 48hs de MeLi.")
+            
+            # 3. Buscar ventas nuevas en Tiendanube
+            ventas_tn = tn_client.get_orders(per_page=20) # Ajustar per_page si es necesario
+            if ventas_tn:
+                print(f"[{ahora}] 🔍 Tiendanube devolvió {len(ventas_tn)} órdenes.")
+                for v in ventas_tn:
+                    tn_id = str(v['id'])
+                    existente = session.query(Orden).filter_by(tn_order_id=tn_id).first()
+                    if not existente:
+                        print(f"✨ Nueva venta detectada en TN: {tn_id} (Status: {v.get('status', 'open')})")
+                        facturar_orden_tn(session, tn_client, afip, v)
+                    else:
+                        # Sincronización de status y montos para TN (similar a MELI si se requiere)
+                        dirty = False
+                        tn_status = v.get('status', 'open')
+                        if existente.meli_status != tn_status: # Usamos meli_status para guardar el status de la plataforma
+                            existente.meli_status = tn_status
+                            dirty = True
+                        
+                        # Tiendanube no tiene un campo directo de 'refunded_amount' en la orden listada
+                        # Habría que hacer un get_order detallado para ver si hay reembolsos
+                        # Por simplicidad, lo omitimos aquí o se implementaría de forma similar a MELI
+                        
+                        if dirty:
+                            session.commit()
+            else:
+                print(f"[{ahora}] No se encontraron ventas en Tiendanube.")
                         
             print(f"\n[{ahora}] Revisión terminada. Todo al día.")
         except Exception as e:

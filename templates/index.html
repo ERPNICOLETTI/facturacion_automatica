@@ -288,7 +288,7 @@
         <nav>
             <ul>
                 <li><a href="javascript:void(0)" class="nav-link active" id="nav-ventas"><i
-                            class="ph-fill ph-chart-pie"></i> Ventas MeLi</a></li>
+                            class="ph-fill ph-chart-pie"></i> Ventas Totales</a></li>
             </ul>
         </nav>
     </aside>
@@ -296,8 +296,8 @@
     <main>
         <header>
             <div>
-                <h1 id="title-main">Dashboard de Ventas</h1>
-                <p id="subtitle-main" style="color:var(--text-dim)">Monitoreo de FULL / MADRYN en tiempo real</p>
+                <h1 id="title-main">Dashboard de Facturación</h1>
+                <p id="subtitle-main" style="color:var(--text-dim)">Control Multi-Plataforma (MeLi + Tiendanube)</p>
             </div>
             <div style="display:flex; align-items:center; gap:12px;">
                 <div id="meli-status" class="badge" style="background:rgba(255,255,255,0.05)">Conectando MeLi...</div>
@@ -335,6 +335,7 @@
                     <thead>
                         <tr>
                             <th>ORDEN</th>
+                            <th>PLATAFORMA</th>
                             <th>CLIENTE</th>
                             <th>LOGÍSTICA</th>
                             <th>MONTO</th>
@@ -394,8 +395,10 @@
 
             filtered.forEach(v => {
                 const row = document.createElement('tr');
+                const platformIcon = v.source === 'MELI' ? '<i class="ph-fill ph-shopping-bag" style="color:#fbbf24"></i> MeLi' : '<i class="ph-fill ph-storefront" style="color:#38bdf8"></i> TN';
                 row.innerHTML = `
                     <td style="font-weight:600; font-size:0.85rem">#${v.id}</td>
+                    <td style="font-size:0.8rem; font-weight:600">${platformIcon}</td>
                     <td>${v.cliente}</td>
                     <td><span class="badge type-${v.tipo.toLowerCase()}">${v.tipo}</span></td>
                     <td style="font-family: monospace; font-weight:700">${v.monto}</td>

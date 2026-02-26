@@ -29,10 +29,12 @@ class Orden(Base):
     client_name = Column(String(100), nullable=False)
     total_amount = Column(Float, nullable=False)
     # Evita duplicados y vincula con la API
+    source = Column(String(20), default="MELI")         # MELI o TN
     meli_order_id = Column(String(50), unique=True, nullable=True)
+    tn_order_id = Column(String(50), unique=True, nullable=True)
     shipping_type = Column(String(20), default="NORMAL") # FULL, MADRYN
     status = Column(String(20), default="PENDIENTE")    # FACTURADA, ERROR, PENDIENTE (interna)
-    meli_status = Column(String(20), default="paid")    # Status real de MeLi (paid, cancelled, etc)
+    meli_status = Column(String(20), default="paid")    # Status real (paid, cancelled, etc)
     is_refunded = Column(Integer, default=0)            # 1 si hay devolución detectada
     amount_paid = Column(Float, default=0.0)            # Lo que pagó el cliente realmente
     amount_refunded = Column(Float, default=0.0)        # Lo que se devolvió (Nota de Crédito)
@@ -45,7 +47,8 @@ class Orden(Base):
     factura = relationship("Factura", back_populates="orden", uselist=False)
 
     def __repr__(self):
-        return f"<Orden id={self.id} meli_id={self.meli_order_id} cliente='{self.client_name}'>"
+        oid = self.meli_order_id or self.tn_order_id
+        return f"<Orden id={self.id} source={self.source} external_id={oid} cliente='{self.client_name}'>"
 
 class Factura(Base):
     """Datos fiscales vinculados a la orden."""

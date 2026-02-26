@@ -73,17 +73,21 @@ def get_stats():
             if o.is_refunded and o.meli_status != "cancelled":
                 display_status += f" (REF. ${o.amount_refunded:,.0f})"
 
+            ext_id = o.meli_order_id or o.tn_order_id
+            letra = o.factura.letra if o.factura else (o.nc_type or "B")
+
             ventas_list.append({
-                "id": o.meli_order_id,
+                "id": ext_id,
                 "cliente": o.client_name,
                 "monto": f"$ {o.total_amount:,.2f}",
                 "tipo": o.shipping_type, 
+                "source": o.source,
                 "status": display_status,
                 "color": color,
                 "has_pdf": o.status == "FACTURADA",
-                "pdf_url": f"/api/pdf/factura_B_{o.meli_order_id}.pdf" if o.status == "FACTURADA" else None,
+                "pdf_url": f"/api/pdf/factura_{letra}_{o.source}_{ext_id}.pdf" if o.status == "FACTURADA" else None,
                 "has_nc": o.status_afip_nc == "NC_EMITIDA",
-                "nc_url": f"/api/pdf/nc_B_{o.meli_order_id}.pdf" if o.status_afip_nc == "NC_EMITIDA" else None
+                "nc_url": f"/api/pdf/nc_{letra}_{o.source}_{ext_id}.pdf" if o.status_afip_nc == "NC_EMITIDA" else None
             })
 
         stats = {
