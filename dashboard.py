@@ -53,21 +53,25 @@ def get_stats():
         
         # 3. Filtrar ventas por tipo y estado
         ventas_list = []
+        total_refunded_global = 0
         for o in todas:
             # Determinar color y estado visual combinando status interno y de MeLi
             color = "#f87171" # Red (Error o Cancelado)
             display_status = o.status
+            total_refunded_global += (o.amount_refunded or 0)
 
             if o.meli_status == "cancelled":
                 display_status = "CANCELADA"
                 color = "#94a3b8" # Gris
             elif o.status == "FACTURADA":
                 color = "#4ade80" # Green (Success)
-            elif o.status == "PENDIENTE":
-                color = "#fbbf24" # Yellow (Pending)
             
-            if o.is_refunded:
-                display_status += " (DEVUELTA)"
+            if o.status_afip_nc == "NC_EMITIDA":
+                display_status = "NOTA CRÉDITO"
+                color = "#fca5a5" # Rojo suave
+
+            if o.is_refunded and o.meli_status != "cancelled":
+                display_status += f" (REF. ${o.amount_refunded:,.0f})"
 
             ventas_list.append({
                 "id": o.meli_order_id,
@@ -76,8 +80,10 @@ def get_stats():
                 "tipo": o.shipping_type, 
                 "status": display_status,
                 "color": color,
-                "has_pdf": o.status == "FACTURADA" and o.meli_status != "cancelled",
-                "pdf_url": f"/api/pdf/factura_B_{o.meli_order_id}.pdf" if o.status == "FACTURADA" else None
+                "has_pdf": o.status == "FACTURADA",
+                "pdf_url": f"/api/pdf/factura_B_{o.meli_order_id}.pdf" if o.status == "FACTURADA" else None,
+                "has_nc": o.status_afip_nc == "NC_EMITIDA",
+                "nc_url": f"/api/pdf/nc_B_{o.meli_order_id}.pdf" if o.status_afip_nc == "NC_EMITIDA" else None
             })
 
         stats = {
@@ -86,7 +92,8 @@ def get_stats():
                 "user": meli_user.get('nickname') if meli_user else "N/A",
                 "sales_count": len(todas),
                 "full_count": len([o for o in todas if o.shipping_type == "FULL"]),
-                "madryn_count": len([o for o in todas if o.shipping_type == "MADRYN"])
+                "madryn_count": len([o for o in todas if o.shipping_type == "MADRYN"]),
+                "total_refunded": total_refunded_global
             },
             "ventas": ventas_list[::-1][:20] # Últimas 20
         }

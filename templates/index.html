@@ -108,7 +108,7 @@
         /* Stats Row */
         .stats-grid {
             display: grid;
-            grid-template-columns: repeat(3, 1fr);
+            grid-template-columns: repeat(4, 1fr);
             gap: 1.5rem;
             margin-bottom: 2rem;
         }
@@ -250,7 +250,19 @@
             font-weight: 500;
         }
 
-        .btn-pdf:hover {
+        .btn-nc {
+            color: #f87171;
+            text-decoration: none;
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            font-size: 0.8rem;
+            font-weight: 500;
+            margin-top: 4px;
+        }
+
+        .btn-pdf:hover,
+        .btn-nc:hover {
             text-decoration: underline;
         }
 
@@ -306,6 +318,10 @@
                     <h3>Madryn (Almacén)</h3>
                     <p id="stat-madryn" style="color:var(--accent-secondary)">0</p>
                 </div>
+                <div class="mini-card">
+                    <h3>Devoluciones / NC</h3>
+                    <p id="stat-refunded" style="color:#f87171">$ 0</p>
+                </div>
             </div>
 
             <div class="filters">
@@ -358,6 +374,7 @@
                 document.getElementById('stat-total').innerText = data.meli.sales_count;
                 document.getElementById('stat-full').innerText = data.meli.full_count;
                 document.getElementById('stat-madryn').innerText = data.meli.madryn_count;
+                document.getElementById('stat-refunded').innerText = `$ ${data.meli.total_refunded.toLocaleString()}`;
                 document.getElementById('meli-status').innerText = `MeLi: ${data.meli.user} (${data.meli.status})`;
 
                 allVentas = data.ventas;
@@ -387,7 +404,11 @@
                         <span style="font-size:0.8rem; font-weight:500; color:${v.color}">${v.status}</span>
                     </td>
                     <td>
-                        ${v.has_pdf ? `<a href="${v.pdf_url}" class="btn-pdf" target="_blank"><i class="ph ph-file-pdf"></i> Ver Factura</a>` : '-'}
+                        <div style="display:flex; flex-direction:column; gap:4px">
+                            ${v.has_pdf ? `<a href="${v.pdf_url}" class="btn-pdf" target="_blank"><i class="ph ph-file-pdf"></i> Factura</a>` : ''}
+                            ${v.has_nc ? `<a href="${v.nc_url}" class="btn-nc" target="_blank"><i class="ph ph-file-arrow-down"></i> Nota Crédito</a>` : ''}
+                            ${!v.has_pdf && !v.has_nc ? '-' : ''}
+                        </div>
                     </td>
                 `;
                 body.appendChild(row);

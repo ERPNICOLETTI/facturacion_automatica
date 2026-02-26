@@ -98,7 +98,8 @@ def facturar_existente(session, client, afip, orden_db):
         factura_db = Factura(
             orden_id=orden_db.id,
             cae=respuesta_afip["CAE"],
-            cae_expiration=respuesta_afip["CAEFchVto"]
+            cae_expiration=respuesta_afip["CAEFchVto"],
+            letra=letra
         )
         session.add(factura_db)
         orden_db.status = "FACTURADA"
@@ -155,20 +156,25 @@ def emitir_nota_credito(session, client, afip, orden_db):
         session.commit()
         return
 
-    # 2. Pedir CAE de NC al Simulador AFIP (Tipo 08 para NC B o 03 para NC A)
-    # Por ahora simplificamos a NC B siempre para el PoC
+    # 2. Determinar tipo de comprobante (A vs B) basado en la factura original
+    letra_orig = factura_orig.letra # Recuperamos si fue A o B
+    tipo_nc = 3 if letra_orig == "A" else 8 # 3 = NC A, 8 = NC B
+    
+    print(f"📉 Emitiendo NOTA DE CRÉDITO {letra_orig} para Orden {meli_id}...")
+
     try:
         payload_nc = {
             "client_name": orden_db.client_name,
             "total_amount": orden_db.total_amount,
             "punto_venta": 14,
-            "tipo_cbte": 8, # Nota de Crédito B
-            "referencia": f"Anula Factura ID {factura_orig.id}"
+            "tipo_cbte": tipo_nc,
+            "referencia": f"Anula Factura {letra_orig} ID {factura_orig.id}"
         }
-        res_nc = afip.emitir_factura(payload_nc) # El simulador sirve para ambos
+        res_nc = afip.emitir_factura(payload_nc)
         
         orden_db.nc_cae = res_nc["CAE"]
         orden_db.nc_cae_expiration = res_nc["CAEFchVto"]
+        orden_db.nc_type = letra_orig
         orden_db.status_afip_nc = "NC_EMITIDA"
         session.commit()
         
@@ -211,6 +217,11 @@ def facturar_orden_nueva(session, client, afip, orden_real, datos_fiscales):
 
     print(f"🚀 {meli_id} clasificada como: {stype} (Logística: {logistic_type or 'N/A'})")
 
+    # Extraer montos reales al centavo desde los pagos
+    payments = orden_real.get('payments', [])
+    total_paid = sum(p.get('total_paid_amount', 0) for p in payments if p.get('status') == 'approved')
+    total_refunded = sum(p.get('transaction_amount_refunded', 0) for p in payments)
+
     nueva_orden = Orden(
         client_name=datos_mapeados['client_name'],
         total_amount=datos_mapeados['total_amount'],
@@ -218,14 +229,20 @@ def facturar_orden_nueva(session, client, afip, orden_real, datos_fiscales):
         shipping_type=stype,
         status="PENDIENTE",
         meli_status=orden_real.get('status', 'paid'),
-        is_refunded=1 if orden_real.get('feedback', {}).get('sale', {}).get('fulfilled') == False else 0 # Simplificado
+        amount_paid=total_paid,
+        amount_refunded=total_refunded,
+        is_refunded=1 if total_refunded > 0 else 0
     )
     session.add(nueva_orden)
     session.flush() 
     
-    # Solo facturar si está pagada y no cancelada
-    if nueva_orden.meli_status == "paid":
+    # Solo facturar si está pagada y no cancelada (y no reembolsada totalmente)
+    if nueva_orden.meli_status == "paid" and total_refunded < nueva_orden.total_amount:
         facturar_existente(session, client, afip, nueva_orden)
+    elif total_refunded >= nueva_orden.total_amount:
+        print(f"⏩ Venta {meli_id} está TOTALMENTE REEMBOLSADA. Marcando como NC directa.")
+        nueva_orden.status = "FACTURADA" # Simulamos que pasó por facturada para poder hacer la NC
+        emitir_nota_credito(session, client, afip, nueva_orden)
     else:
         print(f"⏩ Saltando facturación para {meli_id} (Estado: {nueva_orden.meli_status})")
         session.commit()
@@ -278,20 +295,30 @@ def ejecutar_bot():
                             if orden_real:
                                 facturar_orden_nueva(session, client, afip, orden_real, fiscal)
                         else:
-                            # Sincronizar status (si se canceló, por ejemplo)
+                            # Sincronizar status y montos (REEMBOLSOS "AL CENTAVO")
+                            dirty = False
                             if existente.meli_status != m_status:
-                                print(f"🔄 Actualizando status de {order_id}: {existente.meli_status} -> {m_status}")
                                 existente.meli_status = m_status
-                                
-                                # Si se canceló y tenía factura, gatillar NC
-                                if m_status == "cancelled" and existente.status == "FACTURADA":
-                                    emitir_nota_credito(session, client, afip, existente)
-                                
-                                session.commit()
+                                dirty = True
                             
-                            # Si ya estaba cancelada pero falta la NC, intentarlo
-                            if existente.meli_status == "cancelled" and existente.status == "FACTURADA" and existente.status_afip_nc == "N/A":
-                                emitir_nota_credito(session, client, afip, existente)
+                            # Revisamos si hubo reembolsos nuevos
+                            orden_detallada = client.get_order_details(order_id)
+                            if orden_detallada:
+                                payments = orden_detallada.get('payments', [])
+                                total_refunded = sum(p.get('transaction_amount_refunded', 0) for p in payments)
+                                
+                                if existente.amount_refunded != total_refunded:
+                                    print(f"💰 Reembolso detectado en {order_id}: ${existente.amount_refunded} -> ${total_refunded}")
+                                    existente.amount_refunded = total_refunded
+                                    existente.is_refunded = 1 if total_refunded > 0 else 0
+                                    dirty = True
+                                    
+                                    # Si el reembolso es total o parcial y estaba facturada, NC automática
+                                    if total_refunded > 0 and existente.status == "FACTURADA" and existente.status_afip_nc == "N/A":
+                                        emitir_nota_credito(session, client, afip, existente)
+                            
+                            if dirty:
+                                session.commit()
                 else:
                     print(f"[{ahora}] No se encontraron ventas en las últimas 48hs.")
                         

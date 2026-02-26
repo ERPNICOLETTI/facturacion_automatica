@@ -24,9 +24,12 @@ class Orden(Base):
     shipping_type = Column(String(20), default="NORMAL") # FULL, MADRYN
     status = Column(String(20), default="PENDIENTE")    # FACTURADA, ERROR, PENDIENTE (interna)
     meli_status = Column(String(20), default="paid")    # Status real de MeLi (paid, cancelled, etc)
-    is_refunded = Column(Integer, default=0)            # 1 si es devolución
+    is_refunded = Column(Integer, default=0)            # 1 si hay devolución detectada
+    amount_paid = Column(Float, default=0.0)            # Lo que pagó el cliente realmente
+    amount_refunded = Column(Float, default=0.0)        # Lo que se devolvió (Nota de Crédito)
     nc_cae = Column(String(50), nullable=True)          # CAE de la Nota de Crédito
     nc_cae_expiration = Column(String(20), nullable=True) 
+    nc_type = Column(String(1), nullable=True)          # A o B
     status_afip_nc = Column(String(20), default="N/A")  # NC_EMITIDA, PENDIENTE
     error_message = Column(String(255), nullable=True)
 
@@ -42,6 +45,7 @@ class Factura(Base):
     orden_id = Column(Integer, ForeignKey("ordenes.id"), nullable=False)
     cae = Column(String(14), nullable=False)
     cae_expiration = Column(String(10), nullable=False)   # formato YYYYMMDD
+    letra = Column(String(1), default="B")                # A o B
     created_at = Column(DateTime, default=datetime.utcnow)
     orden = relationship("Orden", back_populates="factura")
 
