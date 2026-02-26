@@ -108,7 +108,7 @@
         /* Stats Row */
         .stats-grid {
             display: grid;
-            grid-template-columns: repeat(4, 1fr);
+            grid-template-columns: repeat(5, 1fr);
             gap: 1.5rem;
             margin-bottom: 2rem;
         }
@@ -307,19 +307,23 @@
         <div id="section-ventas" class="section-content active">
             <div class="stats-grid">
                 <div class="mini-card">
-                    <h3>Total Ventas</h3>
-                    <p id="stat-total">0</p>
-                </div>
-                <div class="mini-card">
-                    <h3>Full (ML)</h3>
-                    <p id="stat-full" style="color:var(--accent-primary)">0</p>
+                    <h3>Tiendanube</h3>
+                    <p id="stat-tn" style="color:#38bdf8">0</p>
                 </div>
                 <div class="mini-card">
                     <h3>Madryn (Almacén)</h3>
                     <p id="stat-madryn" style="color:var(--accent-secondary)">0</p>
                 </div>
                 <div class="mini-card">
-                    <h3>Devoluciones / NC</h3>
+                    <h3>Full (MeLi)</h3>
+                    <p id="stat-full" style="color:var(--accent-primary)">0</p>
+                </div>
+                <div class="mini-card" style="opacity: 0.8">
+                    <h3>Total Ventas</h3>
+                    <p id="stat-total">0</p>
+                </div>
+                <div class="mini-card">
+                    <h3>Devoluciones</h3>
                     <p id="stat-refunded" style="color:#f87171">$ 0</p>
                 </div>
             </div>
@@ -372,9 +376,10 @@
                 const data = await res.json();
 
                 // Actualizar Stats
-                document.getElementById('stat-total').innerText = data.meli.sales_count;
-                document.getElementById('stat-full').innerText = data.meli.full_count;
+                document.getElementById('stat-tn').innerText = data.meli.tn_count;
                 document.getElementById('stat-madryn').innerText = data.meli.madryn_count;
+                document.getElementById('stat-full').innerText = data.meli.full_count;
+                document.getElementById('stat-total').innerText = data.meli.sales_count;
                 document.getElementById('stat-refunded').innerText = `$ ${data.meli.total_refunded.toLocaleString()}`;
                 document.getElementById('meli-status').innerText = `MeLi: ${data.meli.user} (${data.meli.status})`;
 

@@ -95,8 +95,9 @@ def get_stats():
                 "status": "Online" if meli_user else "Offline",
                 "user": meli_user.get('nickname') if meli_user else "N/A",
                 "sales_count": len(todas),
-                "full_count": len([o for o in todas if o.shipping_type == "FULL"]),
-                "madryn_count": len([o for o in todas if o.shipping_type == "MADRYN"]),
+                "tn_count": len([o for o in todas if o.source == "TN"]),
+                "full_count": len([o for o in todas if o.source == "MELI" and o.shipping_type == "FULL"]),
+                "madryn_count": len([o for o in todas if o.source == "MELI" and o.shipping_type == "MADRYN"]),
                 "total_refunded": total_refunded_global
             },
             "ventas": ventas_list[::-1][:20] # Últimas 20
