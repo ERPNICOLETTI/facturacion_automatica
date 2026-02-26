@@ -86,20 +86,20 @@ def facturar_existente(session, meli_client, tn_client, afip, orden_db):
              # Heurística mínima o podrías pedirle al simulador que decida
              pass
 
-    # 2. Calcular importes final para el PDF
-    items_calc, subtotal_neto, iva_contenido, total = calcular_totales(items_mapeados)
+    # 2. Calcular importes final para el PDF y AFIP basándose ÚNICAMENTE en los SKUs
+    items_calc, subtotal_neto, iva_contenido, total_factura = calcular_totales(items_mapeados)
 
-    # 4. Pedir CAE al Simulador AFIP
+    # 4. Pedir CAE al Simulador AFIP con el total de los PRODUCTOS
     try:
         payload_afip = {
             "client_name": orden_db.client_name,
-            "total_amount": orden_db.total_amount,
+            "total_amount": total_factura, # <--- Usamos el total de los SKUs
             "punto_venta": 14,
             "tipo_cbte": int(cod) 
         }
         respuesta_afip = afip.emitir_factura(payload_afip)
         
-        # 5. Guardar la factura en la base de datos
+        # Guardar la factura en la base de datos
         factura_db = Factura(
             orden_id=orden_db.id,
             cae=respuesta_afip["CAE"],
@@ -107,6 +107,8 @@ def facturar_existente(session, meli_client, tn_client, afip, orden_db):
             letra=letra
         )
         session.add(factura_db)
+        # Actualizamos el total de la orden con lo que REALMENTE se facturó
+        orden_db.total_amount = total_factura 
         orden_db.status = "FACTURADA"
         session.commit()
     except Exception as e:
@@ -136,7 +138,7 @@ def facturar_existente(session, meli_client, tn_client, afip, orden_db):
         "orden_compra": str(ext_id),
         "pages": [{"items": items_calc, "page_num": 1, "total_pages": 1, "is_last": True}],
         "subtotal_gravado": f"$ {subtotal_neto:,.2f}".replace(",", "X").replace(".", ",").replace("X", "."),
-        "total": f"$ {total:,.2f}".replace(",", "X").replace(".", ",").replace("X", "."),
+        "total": f"$ {total_factura:,.2f}".replace(",", "X").replace(".", ",").replace("X", "."),
         "iva_contenido": f"$ {iva_contenido:,.2f}".replace(",", "X").replace(".", ",").replace("X", "."),
         "cae": factura_db.cae,
         "cae_expiration": cae_exp_legible,
@@ -415,19 +417,28 @@ def ejecutar_bot():
                     tn_id = str(v['id'])
                     existente = session.query(Orden).filter_by(tn_order_id=tn_id).first()
                     if not existente:
-                        print(f"✨ Nueva venta detectada en TN: {tn_id} (Status: {v.get('status', 'open')})")
-                        facturar_orden_tn(session, tn_client, afip, v)
+                        # Si es nueva y está paga, facturamos
+                        if v.get('payment_status') == "paid":
+                            print(f"✨ Nueva venta detectada en TN: {tn_id} (Paga)")
+                            facturar_orden_tn(session, tn_client, afip, v)
                     else:
-                        # Sincronización de status y montos para TN (similar a MELI si se requiere)
+                        # Sincronización de status para TN
                         dirty = False
-                        tn_status = v.get('status', 'open')
-                        if existente.meli_status != tn_status: # Usamos meli_status para guardar el status de la plataforma
-                            existente.meli_status = tn_status
+                        tn_order_status = v.get('status', 'open') # open, closed, cancelled
+                        tn_payment_status = v.get('payment_status', 'pending') # paid, refunded, voided...
+                        
+                        # REGLA AFIP: Solo NC si fue facturada y luego se canceló o reembolsó
+                        necesita_nc = tn_order_status == 'cancelled' or tn_payment_status == 'refunded'
+                        
+                        if necesita_nc and existente.status == "FACTURADA" and existente.status_afip_nc == "N/A":
+                            print(f"📉 Orden TN #{tn_id} REEMBOLSADA/CANCELADA. Generando Nota de Crédito...")
+                            emitir_nota_credito(session, meli_client, tn_client, afip, existente)
+                            existente.meli_status = tn_payment_status
                             dirty = True
                         
-                        # Tiendanube no tiene un campo directo de 'refunded_amount' en la orden listada
-                        # Habría que hacer un get_order detallado para ver si hay reembolsos
-                        # Por simplicidad, lo omitimos aquí o se implementaría de forma similar a MELI
+                        elif existente.meli_status != tn_payment_status:
+                            existente.meli_status = tn_payment_status
+                            dirty = True
                         
                         if dirty:
                             session.commit()
