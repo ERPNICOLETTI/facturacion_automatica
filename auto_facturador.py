@@ -48,16 +48,15 @@ def calcular_totales(items_meli):
     
     return items_procesados, neto, iva, total
 
-    # 1. Determinar tipo de envío
-    # En MELI 'fulfillment' suele ser FULL. 'MADRYN' puede ser un tag o shipping_option
+    # 1. Determinar tipo de envío (Solo FULL o MADRYN)
     shipping = orden_real.get('shipping', {})
-    shipping_mode = shipping.get('mode', 'me2')
+    shipping_mode = shipping.get('mode', '')
     tags = orden_real.get('tags', [])
     
-    stype = "NORMAL"
+    # Si es fulfillment, es FULL. Todo lo demás es MADRYN (despachado desde el almacén)
     if "fulfillment" in tags or shipping_mode == "fulfillment":
         stype = "FULL"
-    elif "madryn" in str(orden_real).lower(): # Búsqueda genérica por ahora
+    else:
         stype = "MADRYN"
 
     # 2. Guardar la orden en la base de datos (como PENDIENTE)
