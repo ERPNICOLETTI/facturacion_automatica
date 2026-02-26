@@ -140,6 +140,48 @@ def facturar_existente(session, client, afip, orden_db):
     generar_pdf(factura_data, output_path=output_path)
     print(f"✅ ¡ÉXITO! Factura {letra} generada: {output_path.name}")
 
+def emitir_nota_credito(session, client, afip, orden_db):
+    """Genera una Nota de Crédito para una orden cancelada/devuelta."""
+    if orden_db.status_afip_nc == "NC_EMITIDA": return
+    
+    meli_id = orden_db.meli_order_id
+    print(f"📉 Emitiendo NOTA DE CRÉDITO para Orden {meli_id} (Cancelada/Devuelta)...")
+    
+    # 1. Buscar la factura original para referenciarla
+    factura_orig = orden_db.factura
+    if not factura_orig:
+        print(f"⚠️ No hay factura original para la orden {meli_id}. Nada que anular.")
+        orden_db.status_afip_nc = "NC_OMITIDA" # No hay nada que anular
+        session.commit()
+        return
+
+    # 2. Pedir CAE de NC al Simulador AFIP (Tipo 08 para NC B o 03 para NC A)
+    # Por ahora simplificamos a NC B siempre para el PoC
+    try:
+        payload_nc = {
+            "client_name": orden_db.client_name,
+            "total_amount": orden_db.total_amount,
+            "punto_venta": 14,
+            "tipo_cbte": 8, # Nota de Crédito B
+            "referencia": f"Anula Factura ID {factura_orig.id}"
+        }
+        res_nc = afip.emitir_factura(payload_nc) # El simulador sirve para ambos
+        
+        orden_db.nc_cae = res_nc["CAE"]
+        orden_db.nc_cae_expiration = res_nc["CAEFchVto"]
+        orden_db.status_afip_nc = "NC_EMITIDA"
+        session.commit()
+        
+        # 3. Generar PDF de la Nota de Crédito
+        # (Reutilizamos la lógica del PDF pero cambiamos el título)
+        # Aquí llamaríamos a una función similar a facturar_existente pero con título "NOTA DE CRÉDITO"
+        print(f"✅ ¡ÉXITO! Nota de Crédito emitida: CAE {res_nc['CAE']}")
+        
+    except Exception as e:
+        print(f"❌ Error al emitir NC para {meli_id}: {e}")
+        orden_db.status_afip_nc = "PENDIENTE"
+        session.commit()
+
 def facturar_orden_nueva(session, client, afip, orden_real, datos_fiscales):
     """Mapea, guarda en DB (como pendiente) y luego llama a facturar_existente."""
     datos_mapeados = map_meli_to_order(orden_real, datos_fiscales)
@@ -240,7 +282,16 @@ def ejecutar_bot():
                             if existente.meli_status != m_status:
                                 print(f"🔄 Actualizando status de {order_id}: {existente.meli_status} -> {m_status}")
                                 existente.meli_status = m_status
+                                
+                                # Si se canceló y tenía factura, gatillar NC
+                                if m_status == "cancelled" and existente.status == "FACTURADA":
+                                    emitir_nota_credito(session, client, afip, existente)
+                                
                                 session.commit()
+                            
+                            # Si ya estaba cancelada pero falta la NC, intentarlo
+                            if existente.meli_status == "cancelled" and existente.status == "FACTURADA" and existente.status_afip_nc == "N/A":
+                                emitir_nota_credito(session, client, afip, existente)
                 else:
                     print(f"[{ahora}] No se encontraron ventas en las últimas 48hs.")
                         

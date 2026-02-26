@@ -25,6 +25,9 @@ class Orden(Base):
     status = Column(String(20), default="PENDIENTE")    # FACTURADA, ERROR, PENDIENTE (interna)
     meli_status = Column(String(20), default="paid")    # Status real de MeLi (paid, cancelled, etc)
     is_refunded = Column(Integer, default=0)            # 1 si es devolución
+    nc_cae = Column(String(50), nullable=True)          # CAE de la Nota de Crédito
+    nc_cae_expiration = Column(String(20), nullable=True) 
+    status_afip_nc = Column(String(20), default="N/A")  # NC_EMITIDA, PENDIENTE
     error_message = Column(String(255), nullable=True)
 
     factura = relationship("Factura", back_populates="orden", uselist=False)
