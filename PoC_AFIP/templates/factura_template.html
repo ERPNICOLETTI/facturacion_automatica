@@ -1,0 +1,617 @@
+<!DOCTYPE html>
+<html lang="es">
+
+<head>
+  <meta charset="UTF-8">
+  <title>Factura Electronica B</title>
+  <style>
+    @page {
+      size: A4;
+      margin: 10mm;
+    }
+
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+    }
+
+    body {
+      font-family: "Helvetica Neue", Helvetica, Arial, sans-serif;
+      color: #333333;
+      background: #ffffff;
+      line-height: 1.25;
+      font-size: 8.5pt;
+    }
+
+    .factura-page {
+      width: 100%;
+      page-break-after: always;
+      break-after: page;
+      display: flex;
+      flex-direction: column;
+      min-height: 277mm;
+    }
+
+    .factura-page:last-child {
+      page-break-after: auto;
+      break-after: auto;
+    }
+
+    .page-number {
+      text-align: right;
+      font-size: 7.5pt;
+      color: #666666;
+      margin-top: 4px;
+      padding-right: 2px;
+      position: relative;
+    }
+
+    /* ─── HEADER (Flexbox) ─── */
+    .header-box {
+      display: flex;
+      width: 100%;
+      min-height: 120px;
+      border-bottom: none;
+      position: relative;
+    }
+
+    .header-left {
+      width: 45%;
+      padding: 15px 15px 15px 120px;
+      position: relative;
+    }
+
+    .logo-img {
+      position: absolute;
+      left: 15px;
+      top: 15px;
+      width: 85px;
+    }
+
+    .empresa-nombre {
+      font-size: 13pt;
+      font-weight: 700;
+      color: #222222;
+      margin-bottom: 3px;
+    }
+
+    .empresa-datos {
+      font-size: 7.5pt;
+      color: #444444;
+      line-height: 1.4;
+    }
+
+    .iva-cond {
+      font-size: 6.3pt;
+      font-weight: bold;
+      color: #333333;
+      margin-top: 5px;
+      text-transform: uppercase;
+    }
+
+    .header-center {
+      width: 10%;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      position: relative;
+    }
+
+    /* --- ACÁ ESTÁ EL MARCO NEGRO --- */
+    .badge-box {
+      border: 2px solid #000000;
+      /* Borde negro bien marcado */
+      background-color: #ffffff;
+      margin-top: 15px;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      width: 55px;
+      height: 55px;
+      z-index: 2;
+    }
+
+    .badge-letra {
+      font-size: 26pt;
+      font-weight: 700;
+      color: #000000;
+      line-height: 1;
+    }
+
+    .badge-cod {
+      font-size: 6.3pt;
+      font-weight: bold;
+      color: #000000;
+      margin-top: 2px;
+    }
+
+    /* La línea vertical empieza debajo del marco (top: 70px) */
+    .vertical-line {
+      position: absolute;
+      left: 50%;
+      top: 70px;
+      bottom: 0px;
+      width: 1px;
+      background-color: #cccccc;
+      z-index: 1;
+    }
+
+    .header-right {
+      width: 45%;
+      padding: 15px 15px 15px 30px;
+    }
+
+    .titulo-factura {
+      font-size: 11pt;
+      font-weight: 700;
+      color: #222222;
+      margin-bottom: 12px;
+      text-transform: uppercase;
+    }
+
+    .factura-datos-table {
+      width: 100%;
+      border-collapse: collapse;
+    }
+
+    .factura-datos-table td {
+      font-size: 8.5pt;
+      color: #333333;
+      padding-bottom: 2px;
+    }
+
+    .factura-datos-table td.label-right {
+      font-weight: 700;
+      width: 130px;
+      text-align: right;
+      padding-right: 10px;
+    }
+
+    /* ─── INFO CLIENTE (Flexbox) ─── */
+    .info-box {
+      display: flex;
+      width: 100%;
+      background-color: #f2f2f2;
+      padding: 10px 0;
+      margin-top: 0;
+    }
+
+    .info-col {
+      width: 50%;
+    }
+
+    .info-header {
+      background-color: transparent;
+      color: #777777;
+      font-size: 7.5pt;
+      font-weight: 700;
+      padding: 0 10px 5px 10px;
+      border-bottom: none;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+    }
+
+    .info-content {
+      padding: 10px 15px;
+    }
+
+    .info-table {
+      width: 100%;
+      border-collapse: collapse;
+    }
+
+    .info-table td {
+      font-size: 8pt;
+      padding-bottom: 4px;
+      vertical-align: top;
+    }
+
+    .info-table td.label-info {
+      color: #777573;
+      width: 85px;
+      padding-left: 10px;
+    }
+
+    .info-table td.value-info {
+      color: #222222;
+      font-weight: 500;
+    }
+
+    .info-col:last-child .info-table td.label-info {
+      width: 125px;
+    }
+
+    /* ─── CONCEPTOS ─── */
+    .conceptos-header {
+      font-size: 7.5pt;
+      font-weight: 700;
+      color: #777777;
+      padding: 5px 10px;
+      background-color: #ffffff;
+      border-bottom: 1px solid #c8c8c8;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+    }
+
+    .items-table {
+      width: 100%;
+      border-collapse: collapse;
+    }
+
+    .items-table thead {
+      display: table-header-group;
+    }
+
+    .items-table th {
+      background-color: #6d6d6d;
+      color: #ffffff;
+      font-size: 7.5pt;
+      font-weight: 700;
+      text-align: center;
+      padding: 7px 3px;
+      border-right: none;
+      text-transform: uppercase;
+    }
+
+    .items-table td {
+      font-size: 7.5pt;
+      color: #333333;
+      text-align: center;
+      padding: 7px 4px;
+      border-bottom: 1px solid #e0e0e0;
+    }
+
+    .items-table td.td-desc {
+      text-align: left;
+    }
+
+    .items-table td.td-right {
+      text-align: right;
+    }
+
+    /* ─── TOTALES ─── */
+    .totales-box {
+      width: 100%;
+      border-top: 1px solid #c8c8c8;
+    }
+
+    .totales-table {
+      width: 100%;
+      border-collapse: collapse;
+    }
+
+    .totales-table td {
+      padding: 5px 10px;
+    }
+
+    .totales-table .label {
+      font-size: 8pt;
+      color: #555555;
+      text-align: right;
+      width: 82%;
+    }
+
+    .totales-table .value {
+      font-size: 8pt;
+      color: #222222;
+      text-align: right;
+      width: 18%;
+      padding-right: 15px;
+    }
+
+    .row-total {
+      background-color: #555555;
+    }
+
+    .row-total .label {
+      color: #ffffff;
+      font-size: 11pt;
+      font-weight: 700;
+      text-transform: uppercase;
+      padding: 8px 10px;
+    }
+
+    .row-total .value {
+      color: #ffffff;
+      font-size: 13pt;
+      font-weight: 700;
+      text-transform: uppercase;
+      padding: 8px 15px;
+    }
+
+    /* ─── FISCAL / OBS ─── */
+    .fiscal-header {
+      background-color: #ffffff;
+      color: #333333;
+      font-size: 7.9pt;
+      font-weight: bold;
+      padding: 5px 15px;
+      border-top: 1px solid #c8c8c8;
+      border-bottom: 1px solid #c8c8c8;
+    }
+
+    .fiscal-content {
+      padding: 5px 15px;
+    }
+
+    .fiscal-table {
+      width: 100%;
+      border-collapse: collapse;
+    }
+
+    .fiscal-table td {
+      font-size: 7.9pt;
+      color: #333333;
+      padding: 2px 0;
+    }
+
+    .fiscal-table td.label {
+      font-weight: bold;
+      width: 180px;
+    }
+
+    .obs-header {
+      color: #666666;
+      font-size: 7.9pt;
+      font-weight: bold;
+      padding: 5px 15px;
+      border-top: 1px solid #c8c8c8;
+    }
+
+    .obs-content {
+      padding: 0 15px 15px 15px;
+    }
+
+    .obs-box-inner {
+      border: 1px solid #c8c8c8;
+      padding: 5px;
+      font-size: 7.9pt;
+      color: #333333;
+      min-height: 20px;
+    }
+
+    /* ─── FOOTER (QR & CAE) ─── */
+    .footer-wrap {
+      margin-top: 20px;
+      page-break-inside: avoid;
+      break-inside: avoid;
+      margin-top: auto;
+    }
+
+    .footer-box {
+      width: 100%;
+      padding: 10px 0;
+      border-top: 1px solid #c8c8c8;
+      border-bottom: 1px solid #c8c8c8;
+      display: flex;
+      background: #ffffff;
+    }
+
+    .qr-img {
+      width: 90px;
+      height: 90px;
+    }
+
+    .cae-info {
+      display: flex;
+      flex-direction: column;
+      justify-content: center;
+      padding-left: 15px;
+    }
+
+    .cae-num {
+      font-size: 9.6pt;
+      font-weight: bold;
+      color: #404040;
+    }
+
+    .cae-vto {
+      font-size: 6.3pt;
+      color: #333333;
+      margin-top: 4px;
+    }
+
+    .arca-logo-container {
+      margin-left: auto;
+      display: flex;
+      flex-direction: row;
+      align-items: center;
+      gap: 8px;
+      padding-right: 10px;
+    }
+
+    .arca-logo-img {
+      max-height: 75px;
+      width: auto;
+    }
+
+    .comprobante-autorizado {
+      font-size: 7.5pt;
+      font-weight: 700;
+      color: #333333;
+      white-space: nowrap;
+      text-transform: uppercase;
+    }
+  </style>
+</head>
+
+<body>
+
+  {% for pg in pages %}
+  <div class="factura-page">
+    <div class="page-content">
+
+      <div class="header-box">
+        <div class="header-left">
+          <img src="data:image/png;base64,{{ logo_lcb_b64 }}" class="logo-img" alt="Logo">
+          <div class="empresa-nombre">La Casa del Buceador</div>
+          <div class="empresa-datos">
+            Dirección: Av. Córdoba 1859<br>
+            CABA - Ciudad Autónoma de Buenos Aires - CP: 1000 al 1465<br>
+            Teléfono: 2804709945<br>
+            Email: infopm@lacasadelbuceador.com
+          </div>
+          <div class="iva-cond">IVA RESPONSABLE INSCRIPTO</div>
+        </div>
+
+        <div class="header-center">
+          <div class="badge-box">
+            <div class="badge-letra">{{ letra_factura }}</div>
+            <div class="badge-cod">COD. {{ '01' if letra_factura == 'A' else '06' }}</div>
+          </div>
+          <div class="vertical-line"></div>
+        </div>
+
+        <div class="header-right">
+          <div class="titulo-factura">FACTURA {{ letra_factura }} {{ nro_factura }}</div>
+          <table class="factura-datos-table">
+            <tr>
+              <td class="label-right">Fecha:</td>
+              <td>{{ created_at }}</td>
+            </tr>
+            <tr>
+              <td class="label-right">CUIT:</td>
+              <td>30-56406838-8</td>
+            </tr>
+            <tr>
+              <td class="label-right">IIBB:</td>
+              <td>901-978552-6</td>
+            </tr>
+            <tr>
+              <td class="label-right">Inicio de Actividades:</td>
+              <td>01/06/1967</td>
+            </tr>
+            <tr>
+              <td class="label-right">Razón social:</td>
+              <td>PINO SUB S A</td>
+            </tr>
+          </table>
+        </div>
+      </div>
+
+      <div class="info-box">
+        <div class="info-col info-col-left">
+          <div class="info-header">INFORMACION DEL CLIENTE</div>
+          <div class="info-content">
+            <table class="info-table">
+              <tr>
+                <td class="label-info">Cliente:</td>
+                <td class="value-info" style="font-weight:bold;">{{ client_name }}</td>
+              </tr>
+              <tr>
+                <td class="label-info">Dirección:</td>
+                <td class="value-info">{{ client_address }}</td>
+              </tr>
+              <tr>
+                <td class="label-info">DNI/CUIT:</td>
+                <td class="value-info">{{ client_dni or '-' }}</td>
+              </tr>
+              <tr>
+                <td class="label-info">Email:</td>
+                <td class="value-info">{{ client_email or '-' }}</td>
+              </tr>
+              <tr>
+                <td class="label-info">Condición:</td>
+                <td class="value-info">{{ client_condicion }}</td>
+              </tr>
+            </table>
+          </div>
+        </div>
+        <div class="info-col">
+          <div class="info-header">CONDICIONES DE VENTA</div>
+          <div class="info-content">
+            <table class="info-table">
+              <tr>
+                <td class="label-info">Condición de venta:</td>
+                <td class="value-info">{{ condicion_venta }}</td>
+              </tr>
+              <tr>
+                <td class="label-info">Tipo:</td>
+                <td class="value-info">{{ tipo_venta }}</td>
+              </tr>
+              <tr>
+                <td class="label-info">Orden de compra:</td>
+                <td class="value-info">{{ orden_compra }}</td>
+              </tr>
+            </table>
+          </div>
+        </div>
+      </div>
+
+      <div class="conceptos-header">CONCEPTOS</div>
+      <table class="items-table">
+        <thead>
+          <tr>
+            <th style="width:10%;">Cantidad</th>
+            <th style="width:12%;">Código</th>
+            <th style="width:40%; text-align:left;">Descripción</th>
+            <th style="width:13%;">% Bonificación</th>
+            <th style="width:13%;">Precio Unitario</th>
+            <th style="width:12%;">Subtotal</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for item in pg['items'] %}
+          <tr>
+            <td>{{ "%.2f"|format(item.cantidad) }}</td>
+            <td>{{ item.codigo }}</td>
+            <td class="td-desc">{{ item.descripcion }}</td>
+            <td>{{ "%.2f"|format(item.bonificacion) }}</td>
+            <td class="td-right">$ {{ "%.2f"|format(item.precio_unitario) }}</td>
+            <td class="td-right">$ {{ "%.2f"|format(item.subtotal) }}</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+
+      {% if pg['is_last'] %}
+      <div class="totales-box">
+        <table class="totales-table" style="margin-bottom: 0;">
+          <tr>
+            <td class="label" style="border-bottom: 1px solid #c8c8c8;">Subtotal Gravado</td>
+            <td class="value" style="border-bottom: 1px solid #c8c8c8;">{{ subtotal_gravado }}</td>
+          </tr>
+        </table>
+        <div class="row-total" style="display: flex; align-items: center; width: 100%;">
+          <div class="label" style="text-align: right; flex: 1; padding: 10px;">TOTAL</div>
+          <div class="value" style="text-align: right; width: 25%; padding: 10px 15px;">{{ total }}</div>
+        </div>
+      </div>
+      <div class="fiscal-header">Régimen de Transparencia Fiscal al Consumidor (Ley 27.743)</div>
+      <div class="fiscal-content">
+        <table class="fiscal-table">
+          <tr>
+            <td class="label">IVA CONTENIDO</td>
+            <td>{{ iva_contenido }}</td>
+          </tr>
+        </table>
+      </div>
+
+      {% endif %}
+    </div>
+
+    <div class="footer-wrap">
+      <div class="footer-box">
+        <img src="data:image/png;base64,{{ qr_b64 }}" class="qr-img" alt="QR AFIP">
+        <div class="cae-info">
+          <div class="cae-num">CAE Nº: {{ cae }}</div>
+          <div class="cae-vto">Fecha de Vto. de CAE: {{ cae_expiration }}</div>
+        </div>
+        <div class="arca-logo-container">
+          <img src="data:image/jpeg;base64,{{ arca_jpg_b64 }}" class="arca-logo-img" alt="ARCA / AFIP">
+          <div class="comprobante-autorizado">Comprobante Autorizado</div>
+        </div>
+      </div>
+    </div>
+
+    <div class="page-number">
+      Hoja {{ pg['page_num'] }} / {{ pg['total_pages'] }}
+    </div>
+
+  </div> {% endfor %}
+
+</body>
+
+</html>

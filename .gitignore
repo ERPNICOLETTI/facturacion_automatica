@@ -1,0 +1,52 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# Virtual Environment
+.venv/
+venv/
+ENV/
+
+# IDEs
+.vscode/
+.idea/
+
+# Database
+*.db
+*.sqlite3
+
+# Security/Certificates (Sensitive)
+*.key
+*.crt
+*.csr
+*.pem
+
+# Generated PDFs
+*.pdf
+
+# Temp/Review Images
+**/tmp_imgs/
+**/rev_imgs/
+**/ref_imgs/
+
+# OS files
+Thumbs.db
+Desktop.ini
