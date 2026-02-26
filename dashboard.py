@@ -1,6 +1,6 @@
 from flask import Flask, render_template, jsonify, send_from_directory
 from API.meli_client import MeliClient
-from PoC_AFIP.database import SessionLocal, Orden, Factura
+from PoC_AFIP.database import SessionLocal, Orden, Factura, init_db
 import os
 from pathlib import Path
 
@@ -82,5 +82,6 @@ def get_pdf(filename):
     return send_from_directory(PDF_DIR, filename)
 
 if __name__ == '__main__':
+    init_db()  # Crear las tablas si no existen
     print(f"🚀 Iniciando Dashboard Pro en http://{HOST}:{PORT}")
     app.run(host=HOST, port=PORT, debug=True)
