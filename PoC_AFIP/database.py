@@ -21,8 +21,10 @@ class Orden(Base):
     total_amount = Column(Float, nullable=False)
     # Evita duplicados y vincula con la API
     meli_order_id = Column(String(50), unique=True, nullable=True)
-    shipping_type = Column(String(20), default="NORMAL") # FULL, MADRYN, etc
-    status = Column(String(20), default="PENDIENTE")    # FACTURADA, ERROR, PENDIENTE
+    shipping_type = Column(String(20), default="NORMAL") # FULL, MADRYN
+    status = Column(String(20), default="PENDIENTE")    # FACTURADA, ERROR, PENDIENTE (interna)
+    meli_status = Column(String(20), default="paid")    # Status real de MeLi (paid, cancelled, etc)
+    is_refunded = Column(Integer, default=0)            # 1 si es devolución
     error_message = Column(String(255), nullable=True)
 
     factura = relationship("Factura", back_populates="orden", uselist=False)

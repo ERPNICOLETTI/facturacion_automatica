@@ -155,12 +155,19 @@ def facturar_orden_nueva(session, client, afip, orden_real, datos_fiscales):
         total_amount=datos_mapeados['total_amount'],
         meli_order_id=meli_id,
         shipping_type=stype,
-        status="PENDIENTE"
+        status="PENDIENTE",
+        meli_status=orden_real.get('status', 'paid'),
+        is_refunded=1 if orden_real.get('feedback', {}).get('sale', {}).get('fulfilled') == False else 0 # Simplificado
     )
     session.add(nueva_orden)
     session.flush() 
     
-    facturar_existente(session, client, afip, nueva_orden)
+    # Solo facturar si está pagada y no cancelada
+    if nueva_orden.meli_status == "paid":
+        facturar_existente(session, client, afip, nueva_orden)
+    else:
+        print(f"⏩ Saltando facturación para {meli_id} (Estado: {nueva_orden.meli_status})")
+        session.commit()
 
 
 def ejecutar_bot():
@@ -196,13 +203,21 @@ def ejecutar_bot():
                 if ventas and ventas.get('results'):
                     for v in ventas['results']:
                         order_id = str(v['id'])
+                        m_status = v.get('status', 'paid')
+                        
                         existente = session.query(Orden).filter_by(meli_order_id=order_id).first()
                         if not existente:
-                            print(f"\n✨ Nueva venta directa detectada en MeLi: {order_id}")
+                            print(f"\n✨ Nueva venta detectada: {order_id} (Status: {m_status})")
                             orden_real = client.get_order_details(order_id)
                             fiscal = client.get_billing_info(order_id)
                             if orden_real:
                                 facturar_orden_nueva(session, client, afip, orden_real, fiscal)
+                        else:
+                            # Sincronizar status (si se canceló, por ejemplo)
+                            if existente.meli_status != m_status:
+                                print(f"🔄 Actualizando status de {order_id}: {existente.meli_status} -> {m_status}")
+                                existente.meli_status = m_status
+                                session.commit()
                         
             print(f"\n[{ahora}] Revisión terminada. Todo al día.")
         except Exception as e:
