@@ -3,6 +3,7 @@ auto_facturador.py - Bot que revisa Mercado Libre y factura automáticamente las
 """
 import time
 from datetime import datetime
+import datetime as dt_lib
 from pathlib import Path
 
 from API.meli_client import MeliClient
@@ -144,11 +145,29 @@ def facturar_orden_nueva(session, client, afip, orden_real, datos_fiscales):
     datos_mapeados = map_meli_to_order(orden_real, datos_fiscales)
     meli_id = datos_mapeados['meli_order_id']
 
-    # Determinar tipo de envío
+    # DETERMINACIÓN CRÍTICA: ¿FULL o MADRYN?
     shipping = orden_real.get('shipping', {})
+    shipping_id = shipping.get('id')
     shipping_mode = shipping.get('mode', '')
+    logistic_type = shipping.get('logistic_type', '')
     tags = orden_real.get('tags', [])
-    stype = "FULL" if ("fulfillment" in tags or shipping_mode == "fulfillment") else "MADRYN"
+
+    # Si en la orden no viene el tipo de logística, lo buscamos en el shipment (API externa)
+    if not logistic_type and shipping_id:
+        shipment = client.get_shipment_details(shipping_id)
+        if shipment:
+            # En x-format-new puede venir en la raíz o dentro de un objeto 'logistic'
+            logistic_obj = shipment.get('logistic', {})
+            logistic_type = shipment.get('logistic_type') or logistic_obj.get('type') or ''
+            shipping_mode = shipment.get('mode') or logistic_obj.get('mode') or ''
+    
+    # REGLA DE ORO DE MERCADO LIBRE:
+    if logistic_type == "fulfillment" or shipping_mode == "fulfillment" or "fulfillment" in tags:
+        stype = "FULL"
+    else:
+        stype = "MADRYN"
+
+    print(f"🚀 {meli_id} clasificada como: {stype} (Logística: {logistic_type or 'N/A'})")
 
     nueva_orden = Orden(
         client_name=datos_mapeados['client_name'],
@@ -193,21 +212,25 @@ def ejecutar_bot():
                 for p in pendientes:
                     facturar_existente(session, client, afip, p)
             
-            # 2. Buscar ventas nuevas directamente en MeLi (por si el dashboard no las vio)
+            # 2. Buscar ventas nuevas directamente en MeLi (Últimas 48hs para asegurar)
             user_data = client.get_my_user_id()
             if user_data:
                 my_id = user_data.get('id')
-                search_url = f"{client.api_url}/orders/search?seller={my_id}&limit=10"
+                fecha_limit = (datetime.now() - dt_lib.timedelta(days=1)).strftime('%Y-%m-%dT%H:%M:%S.000-00:00')
+                
+                # Traer más resultados (limit 50) y filtrar por fecha de creación reciente
+                search_url = f"{client.api_url}/orders/search?seller={my_id}&order.date_created.from={fecha_limit}&limit=50&sort=date_desc"
                 ventas = client._make_request("GET", search_url)
                 
                 if ventas and ventas.get('results'):
+                    print(f"[{ahora}] 🔍 MeLi devolvió {len(ventas['results'])} órdenes de las últimas 24hs.")
                     for v in ventas['results']:
                         order_id = str(v['id'])
                         m_status = v.get('status', 'paid')
                         
                         existente = session.query(Orden).filter_by(meli_order_id=order_id).first()
                         if not existente:
-                            print(f"\n✨ Nueva venta detectada: {order_id} (Status: {m_status})")
+                            print(f"✨ Nueva venta detectada: {order_id} (Status: {m_status})")
                             orden_real = client.get_order_details(order_id)
                             fiscal = client.get_billing_info(order_id)
                             if orden_real:
@@ -218,6 +241,8 @@ def ejecutar_bot():
                                 print(f"🔄 Actualizando status de {order_id}: {existente.meli_status} -> {m_status}")
                                 existente.meli_status = m_status
                                 session.commit()
+                else:
+                    print(f"[{ahora}] No se encontraron ventas en las últimas 48hs.")
                         
             print(f"\n[{ahora}] Revisión terminada. Todo al día.")
         except Exception as e:

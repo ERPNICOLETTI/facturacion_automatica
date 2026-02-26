@@ -217,6 +217,29 @@
             margin-right: 8px;
         }
 
+        .filters {
+            display: flex;
+            gap: 12px;
+            margin-bottom: 20px;
+        }
+
+        .btn-filter {
+            background: rgba(255, 255, 255, 0.05);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            color: var(--text-dim);
+            padding: 8px 16px;
+            border-radius: 8px;
+            cursor: pointer;
+            font-size: 0.85rem;
+            transition: all 0.2s;
+        }
+
+        .btn-filter.active {
+            background: var(--accent-primary);
+            color: white;
+            border-color: var(--accent-primary);
+        }
+
         .btn-pdf {
             color: var(--accent-primary);
             text-decoration: none;
@@ -285,6 +308,12 @@
                 </div>
             </div>
 
+            <div class="filters">
+                <button class="btn-filter active" onclick="setFilter('ALL')">Todas</button>
+                <button class="btn-filter" onclick="setFilter('FULL')">Full (ML)</button>
+                <button class="btn-filter" onclick="setFilter('MADRYN')">Madryn (Almacén)</button>
+            </div>
+
             <div class="table-container">
                 <table>
                     <thead>
@@ -306,6 +335,20 @@
     </main>
 
     <script>
+        let currentFilter = 'ALL';
+        let allVentas = [];
+
+        function setFilter(filter) {
+            currentFilter = filter;
+            document.querySelectorAll('.btn-filter').forEach(btn => {
+                const isAll = filter === 'ALL' && btn.innerText.includes('Todas');
+                const isFull = filter === 'FULL' && btn.innerText.includes('Full');
+                const isMadryn = filter === 'MADRYN' && btn.innerText.includes('Madryn');
+                btn.classList.toggle('active', isAll || isFull || isMadryn);
+            });
+            renderTable();
+        }
+
         async function loadData() {
             try {
                 const res = await fetch('/api/stats');
@@ -317,30 +360,39 @@
                 document.getElementById('stat-madryn').innerText = data.meli.madryn_count;
                 document.getElementById('meli-status').innerText = `MeLi: ${data.meli.user} (${data.meli.status})`;
 
-                const body = document.getElementById('ventas-body');
-                body.innerHTML = '';
-
-                data.ventas.forEach(v => {
-                    const row = document.createElement('tr');
-                    row.innerHTML = `
-                        <td style="font-weight:600; font-size:0.85rem">#${v.id}</td>
-                        <td>${v.cliente}</td>
-                        <td><span class="badge type-${v.tipo.toLowerCase()}">${v.tipo}</span></td>
-                        <td style="font-family: monospace; font-weight:700">${v.monto}</td>
-                        <td>
-                            <span class="dot" style="background:${v.color}"></span>
-                            <span style="font-size:0.8rem; font-weight:500; color:${v.color}">${v.status}</span>
-                        </td>
-                        <td>
-                            ${v.has_pdf ? `<a href="${v.pdf_url}" class="btn-pdf" target="_blank"><i class="ph ph-file-pdf"></i> Ver Factura</a>` : '-'}
-                        </td>
-                    `;
-                    body.appendChild(row);
-                });
-
-            } catch (e) { console.error(e); }
+                allVentas = data.ventas;
+                renderTable();
+            } catch (e) {
+                console.error(e);
+            }
         }
 
+        function renderTable() {
+            const body = document.getElementById('ventas-body');
+            body.innerHTML = '';
+
+            const filtered = currentFilter === 'ALL'
+                ? allVentas
+                : allVentas.filter(v => v.tipo === currentFilter);
+
+            filtered.forEach(v => {
+                const row = document.createElement('tr');
+                row.innerHTML = `
+                    <td style="font-weight:600; font-size:0.85rem">#${v.id}</td>
+                    <td>${v.cliente}</td>
+                    <td><span class="badge type-${v.tipo.toLowerCase()}">${v.tipo}</span></td>
+                    <td style="font-family: monospace; font-weight:700">${v.monto}</td>
+                    <td>
+                        <span class="dot" style="background:${v.color}"></span>
+                        <span style="font-size:0.8rem; font-weight:500; color:${v.color}">${v.status}</span>
+                    </td>
+                    <td>
+                        ${v.has_pdf ? `<a href="${v.pdf_url}" class="btn-pdf" target="_blank"><i class="ph ph-file-pdf"></i> Ver Factura</a>` : '-'}
+                    </td>
+                `;
+                body.appendChild(row);
+            });
+        }
 
         loadData();
         setInterval(loadData, 10000);

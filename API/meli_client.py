@@ -98,6 +98,9 @@ class MeliClient:
     def get_order_details(self, order_id):
         return self._make_request("GET", f"{self.api_url}/orders/{order_id}")
 
+    def get_shipment_details(self, shipment_id):
+        return self._make_request("GET", f"{self.api_url}/shipments/{shipment_id}", extra_headers={"x-format-new": "true"})
+
     def get_billing_info(self, order_id):
         # Endpoint V2 oficial: más corto y limpio
         url = f"{self.api_url}/orders/{order_id}/billing_info"
