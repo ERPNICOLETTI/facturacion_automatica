@@ -19,32 +19,59 @@ from PoC_AFIP.generador_pdf import generar_pdf
 MINUTOS_REVISION = 15
 # ──────────────────────────────────────────────────────────────────────────────
 
-def calcular_totales(items_list):
-    """Calcula subtotales e IVA a partir de una lista de ítems mapeada uniformemente."""
+def cargar_skus_iva_reducido():
+    """Carga la lista de SKUs que graban 10.5% desde el archivo txt."""
+    path = Path(__file__).parent / "skus_iva_10_5.txt"
+    if not path.exists():
+        return []
+    with open(path, "r", encoding="utf-8") as f:
+        return [line.strip() for line in f if line.strip()]
+
+def calcular_totales(items_list, skus_105=None):
+    """Calcula subtotales e IVA discriminado por ítem (21% o 10.5%)."""
+    if skus_105 is None: skus_105 = []
+    
     items_procesados = []
-    subtotal_gravado = 0.0
+    neto_total = 0.0
+    iva_total = 0.0
+    total_gral = 0.0
     
     for item in items_list:
         precio = float(item.get('precio_unitario', 0))
         cantidad = int(item.get('cantidad', 1))
+        sku = str(item.get('codigo', '')).strip()
         
         subtotal = round(precio * cantidad, 2)
-        subtotal_gravado += subtotal
+        
+        # Determinar si es 21% o 10.5%
+        if sku in skus_105:
+            divisor = 1.105
+            tasa = 0.105
+            tipo_iva = "10.5%"
+        else:
+            divisor = 1.21
+            tasa = 0.21
+            tipo_iva = "21%"
+            
+        neto_item = round(subtotal / divisor, 2)
+        iva_item = round(subtotal - neto_item, 2)
+        
+        neto_total += neto_item
+        iva_total += iva_item
+        total_gral += subtotal
         
         items_procesados.append({
-            "codigo": item.get('codigo', 'S/C'),
-            "descripcion": item.get('descripcion', 'Producto'),
+            "codigo": sku or 'S/C',
+            "descripcion": f"{item.get('descripcion', 'Producto')} ({tipo_iva})",
             "cantidad": cantidad,
             "precio_unitario": precio,
             "bonificacion": 0.0,
-            "subtotal": subtotal
+            "subtotal": subtotal,
+            "iva_item": iva_item,
+            "neto_item": neto_item
         })
         
-    iva = round(subtotal_gravado / 1.21 * 0.21, 2)
-    neto = round(subtotal_gravado / 1.21, 2)
-    total = round(subtotal_gravado, 2)
-    
-    return items_procesados, neto, iva, total
+    return items_procesados, round(neto_total, 2), round(iva_total, 2), round(total_gral, 2)
 
 def facturar_existente(session, meli_client, tn_client, afip, orden_db):
     """Procesa una orden que ya está en la DB pero sigue PENDIENTE."""
@@ -87,7 +114,8 @@ def facturar_existente(session, meli_client, tn_client, afip, orden_db):
              pass
 
     # 2. Calcular importes final para el PDF y AFIP basándose ÚNICAMENTE en los SKUs
-    items_calc, subtotal_neto, iva_contenido, total_factura = calcular_totales(items_mapeados)
+    skus_105 = cargar_skus_iva_reducido()
+    items_calc, subtotal_neto, iva_contenido, total_factura = calcular_totales(items_mapeados, skus_105)
 
     # 4. Pedir CAE al Simulador AFIP con el total de los PRODUCTOS
     try:
@@ -203,14 +231,16 @@ def emitir_nota_credito(session, meli_client, tn_client, afip, orden_db):
         
         # Necesitamos la info detallada para el PDF de la NC (items, etc.)
         items_calc = []
+        skus_105 = cargar_skus_iva_reducido()
+
         if orden_db.source == "MELI":
             detalles = meli_client.get_order_details(ext_id)
             mapeo = map_meli_to_order(detalles) if detalles else None
-            items_calc, subtotal_neto, iva_contenido, total = calcular_totales(mapeo['items'] if mapeo else [])
+            items_calc, subtotal_neto, iva_contenido, total = calcular_totales(mapeo['items'] if mapeo else [], skus_105)
         else:
             detalles = tn_client.get_order(ext_id)
             mapeo = map_tn_to_order(detalles) if detalles else None
-            items_calc, subtotal_neto, iva_contenido, total = calcular_totales(mapeo['items'] if mapeo else [])
+            items_calc, subtotal_neto, iva_contenido, total = calcular_totales(mapeo['items'] if mapeo else [], skus_105)
         
         raw_vto = res_nc['CAEFchVto']
         vto_legible = f"{raw_vto[6:8]}/{raw_vto[4:6]}/{raw_vto[0:4]}" if len(raw_vto) == 8 else raw_vto

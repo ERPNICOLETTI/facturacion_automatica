@@ -330,8 +330,9 @@
 
             <div class="filters">
                 <button class="btn-filter active" onclick="setFilter('ALL')">Todas</button>
-                <button class="btn-filter" onclick="setFilter('FULL')">Full (ML)</button>
+                <button class="btn-filter" onclick="setFilter('TN')">Tiendanube</button>
                 <button class="btn-filter" onclick="setFilter('MADRYN')">Madryn (Almacén)</button>
+                <button class="btn-filter" onclick="setFilter('FULL')">Full (MeLi)</button>
             </div>
 
             <div class="table-container">
@@ -363,9 +364,10 @@
             currentFilter = filter;
             document.querySelectorAll('.btn-filter').forEach(btn => {
                 const isAll = filter === 'ALL' && btn.innerText.includes('Todas');
-                const isFull = filter === 'FULL' && btn.innerText.includes('Full');
+                const isTn = filter === 'TN' && btn.innerText.includes('Tiendanube');
                 const isMadryn = filter === 'MADRYN' && btn.innerText.includes('Madryn');
-                btn.classList.toggle('active', isAll || isFull || isMadryn);
+                const isFull = filter === 'FULL' && btn.innerText.includes('Full');
+                btn.classList.toggle('active', isAll || isTn || isFull || isMadryn);
             });
             renderTable();
         }
@@ -394,9 +396,12 @@
             const body = document.getElementById('ventas-body');
             body.innerHTML = '';
 
-            const filtered = currentFilter === 'ALL'
-                ? allVentas
-                : allVentas.filter(v => v.tipo === currentFilter);
+            let filtered = allVentas;
+            if (currentFilter === 'TN') {
+                filtered = allVentas.filter(v => v.source === 'TN');
+            } else if (currentFilter === 'MADRYN' || currentFilter === 'FULL') {
+                filtered = allVentas.filter(v => v.tipo === currentFilter && v.source === 'MELI');
+            }
 
             filtered.forEach(v => {
                 const row = document.createElement('tr');

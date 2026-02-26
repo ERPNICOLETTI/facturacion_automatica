@@ -73,6 +73,9 @@ def get_stats():
             if o.is_refunded and o.meli_status != "cancelled":
                 display_status += f" (REF. ${o.amount_refunded:,.0f})"
 
+            # Determinar fuente con fallback para órdenes viejas
+            source_final = o.source or "MELI"
+            tipo_final = o.shipping_type or "MADRYN"
             ext_id = o.meli_order_id or o.tn_order_id
             letra = o.factura.letra if o.factura else (o.nc_type or "B")
 
@@ -80,14 +83,14 @@ def get_stats():
                 "id": ext_id,
                 "cliente": o.client_name,
                 "monto": f"$ {o.total_amount:,.2f}",
-                "tipo": o.shipping_type, 
-                "source": o.source,
+                "tipo": tipo_final, 
+                "source": source_final,
                 "status": display_status,
                 "color": color,
                 "has_pdf": o.status == "FACTURADA",
-                "pdf_url": f"/api/pdf/factura_{letra}_{o.source}_{ext_id}.pdf" if o.status == "FACTURADA" else None,
+                "pdf_url": f"/api/pdf/factura_{letra}_{source_final}_{ext_id}.pdf" if o.status == "FACTURADA" else None,
                 "has_nc": o.status_afip_nc == "NC_EMITIDA",
-                "nc_url": f"/api/pdf/nc_{letra}_{o.source}_{ext_id}.pdf" if o.status_afip_nc == "NC_EMITIDA" else None
+                "nc_url": f"/api/pdf/nc_{letra}_{source_final}_{ext_id}.pdf" if o.status_afip_nc == "NC_EMITIDA" else None
             })
 
         stats = {
@@ -96,11 +99,11 @@ def get_stats():
                 "user": meli_user.get('nickname') if meli_user else "N/A",
                 "sales_count": len(todas),
                 "tn_count": len([o for o in todas if o.source == "TN"]),
-                "full_count": len([o for o in todas if o.source == "MELI" and o.shipping_type == "FULL"]),
-                "madryn_count": len([o for o in todas if o.source == "MELI" and o.shipping_type == "MADRYN"]),
+                "full_count": len([o for o in todas if (o.source == "MELI" or o.source is None) and o.shipping_type == "FULL"]),
+                "madryn_count": len([o for o in todas if (o.source == "MELI" or o.source is None) and (o.shipping_type == "MADRYN" or o.shipping_type is None)]),
                 "total_refunded": total_refunded_global
             },
-            "ventas": ventas_list[::-1][:20] # Últimas 20
+            "ventas": ventas_list[::-1][:100] # Subimos a las últimas 100
         }
         return jsonify(stats)
     except Exception as e:
