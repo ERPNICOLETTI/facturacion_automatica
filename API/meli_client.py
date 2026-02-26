@@ -84,8 +84,8 @@ class MeliClient:
             response = requests.request(method, url, headers=headers, params=params)
             if response.status_code == 200:
                 return response.json()
-            # En V2 un 404 es normal si el cliente no cargó datos
-            if response.status_code != 404: 
+            # 204 (No Content) y 404 (Not Found) son normales en algunos endpoints
+            if response.status_code not in [204, 404]: 
                 print(f"⚠️ Error {response.status_code} en {url}: {response.text}")
             return None
         except Exception as e:

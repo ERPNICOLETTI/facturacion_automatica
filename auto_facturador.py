@@ -48,32 +48,18 @@ def calcular_totales(items_meli):
     
     return items_procesados, neto, iva, total
 
-def facturar_orden_nueva(session, client, afip, orden_real, datos_fiscales):
-    """Mapea, guarda en DB, pide CAE y genera el PDF de una orden nueva."""
-    datos_mapeados = map_meli_to_order(orden_real, datos_fiscales)
-    meli_id = datos_mapeados['meli_order_id']
-
-    # 1. Determinar tipo de envío (Solo FULL o MADRYN)
-    shipping = orden_real.get('shipping', {})
-    shipping_mode = shipping.get('mode', '')
-    tags = orden_real.get('tags', [])
+def facturar_existente(session, client, afip, orden_db):
+    """Procesa una orden que ya está en la DB pero sigue PENDIENTE."""
+    meli_id = orden_db.meli_order_id
+    print(f"📄 Procesando facturación para Orden {meli_id}...")
     
-    # Si es fulfillment, es FULL. Todo lo demás es MADRYN (despachado desde el almacén)
-    if "fulfillment" in tags or shipping_mode == "fulfillment":
-        stype = "FULL"
-    else:
-        stype = "MADRYN"
-
-    # 2. Guardar la orden en la base de datos (como PENDIENTE)
-    nueva_orden = Orden(
-        client_name=datos_mapeados['client_name'],
-        total_amount=datos_mapeados['total_amount'],
-        meli_order_id=meli_id,
-        shipping_type=stype,
-        status="PENDIENTE"
-    )
-    session.add(nueva_orden)
-    session.flush() # Guardamos temporalmente para obtener el ID
+    # Traemos la orden real y sus datos fiscales (V2)
+    orden_real = client.get_order_details(meli_id)
+    datos_fiscales = client.get_billing_info(meli_id)
+    
+    if not orden_real:
+        print(f"⚠️ No se pudo obtener info de la orden {meli_id}")
+        return
 
     # 2. Calcular importes
     items_calc, subtotal_neto, iva_contenido, total = calcular_totales(orden_real.get('order_items', []))
@@ -100,8 +86,8 @@ def facturar_orden_nueva(session, client, afip, orden_real, datos_fiscales):
     # 4. Pedir CAE al Simulador AFIP
     try:
         payload_afip = {
-            "client_name": nueva_orden.client_name,
-            "total_amount": nueva_orden.total_amount,
+            "client_name": orden_db.client_name,
+            "total_amount": orden_db.total_amount,
             "punto_venta": 14,
             "tipo_cbte": int(cod) 
         }
@@ -109,19 +95,19 @@ def facturar_orden_nueva(session, client, afip, orden_real, datos_fiscales):
         
         # 5. Guardar la factura en la base de datos
         factura_db = Factura(
-            orden_id=nueva_orden.id,
+            orden_id=orden_db.id,
             cae=respuesta_afip["CAE"],
             cae_expiration=respuesta_afip["CAEFchVto"]
         )
         session.add(factura_db)
-        nueva_orden.status = "FACTURADA"
+        orden_db.status = "FACTURADA"
         session.commit()
     except Exception as e:
         print(f"❌ Error AFIP en orden {meli_id}: {e}")
-        nueva_orden.status = "ERROR"
-        nueva_orden.error_message = str(e)
+        orden_db.status = "ERROR"
+        orden_db.error_message = str(e)
         session.commit()
-        return # Frenamos aquí
+        return
     
     # 6. Preparar datos para el PDF
     raw = factura_db.cae_expiration
@@ -131,7 +117,7 @@ def facturar_orden_nueva(session, client, afip, orden_real, datos_fiscales):
     factura_data = {
         "letra_factura": letra,
         "nro_factura": nro_factura,
-        "client_name": nueva_orden.client_name,
+        "client_name": orden_db.client_name,
         "client_address": "Mercado Libre - Envío",
         "client_dni": dni_cuit, 
         "client_email": "-",
@@ -153,6 +139,29 @@ def facturar_orden_nueva(session, client, afip, orden_real, datos_fiscales):
     generar_pdf(factura_data, output_path=output_path)
     print(f"✅ ¡ÉXITO! Factura {letra} generada: {output_path.name}")
 
+def facturar_orden_nueva(session, client, afip, orden_real, datos_fiscales):
+    """Mapea, guarda en DB (como pendiente) y luego llama a facturar_existente."""
+    datos_mapeados = map_meli_to_order(orden_real, datos_fiscales)
+    meli_id = datos_mapeados['meli_order_id']
+
+    # Determinar tipo de envío
+    shipping = orden_real.get('shipping', {})
+    shipping_mode = shipping.get('mode', '')
+    tags = orden_real.get('tags', [])
+    stype = "FULL" if ("fulfillment" in tags or shipping_mode == "fulfillment") else "MADRYN"
+
+    nueva_orden = Orden(
+        client_name=datos_mapeados['client_name'],
+        total_amount=datos_mapeados['total_amount'],
+        meli_order_id=meli_id,
+        shipping_type=stype,
+        status="PENDIENTE"
+    )
+    session.add(nueva_orden)
+    session.flush() 
+    
+    facturar_existente(session, client, afip, nueva_orden)
+
 
 def ejecutar_bot():
     """Bucle infinito que revisa y factura."""
@@ -167,52 +176,44 @@ def ejecutar_bot():
     
     while True:
         ahora = datetime.now().strftime("%H:%M:%S")
-        print(f"\n[{ahora}] Buscando ventas en Mercado Libre...")
-        
         session = SessionLocal()
+        
         try:
-            # Pedimos nuestro propio ID para buscar nuestras ventas
+            # 1. Facturar órdenes que estén PENDIENTES en la base de datos (Ej: las del Dashboard)
+            pendientes = session.query(Orden).filter_by(status="PENDIENTE").all()
+            if pendientes:
+                print(f"\n[{ahora}] 🔍 Encontradas {len(pendientes)} órdenes pendientes de facturación.")
+                for p in pendientes:
+                    facturar_existente(session, client, afip, p)
+            
+            # 2. Buscar ventas nuevas directamente en MeLi (por si el dashboard no las vio)
             user_data = client.get_my_user_id()
             if user_data:
                 my_id = user_data.get('id')
-                # Buscamos las últimas 15 ventas
-                search_url = f"{client.api_url}/orders/search?seller={my_id}&limit=15"
+                search_url = f"{client.api_url}/orders/search?seller={my_id}&limit=10"
                 ventas = client._make_request("GET", search_url)
                 
                 if ventas and ventas.get('results'):
-                    nuevas_encontradas = 0
-                    
-                    # Recorremos las ventas encontradas
                     for v in ventas['results']:
                         order_id = str(v['id'])
-                        
-                        # ¿Ya está facturada en nuestra base de datos?
                         existente = session.query(Orden).filter_by(meli_order_id=order_id).first()
-                        
                         if not existente:
-                            nuevas_encontradas += 1
-                            print(f"\n✨ Nueva venta sin facturar detectada: {order_id}")
-                            
-                            # Traemos la orden real y sus datos fiscales (V2)
+                            print(f"\n✨ Nueva venta directa detectada en MeLi: {order_id}")
                             orden_real = client.get_order_details(order_id)
-                            datos_fiscales = client.get_billing_info(order_id)
-                            
+                            fiscal = client.get_billing_info(order_id)
                             if orden_real:
-                                facturar_orden_nueva(session, client, afip, orden_real, datos_fiscales)
-                                
-                            time.sleep(1) # Pausita corta para no saturar a MeLi
-                            
-                    if nuevas_encontradas == 0:
-                        print("ℹ️ No hay ventas nuevas. Todas están facturadas.")
-                else:
-                    print("ℹ️ No se encontraron ventas recientes.")
+                                facturar_orden_nueva(session, client, afip, orden_real, fiscal)
+                        
+            print(f"\n[{ahora}] Revisión terminada. Todo al día.")
         except Exception as e:
-            print(f"❌ Error durante la revisión: {e}")
+            print(f"❌ Error en el loop del bot: {e}")
+            import traceback
+            traceback.print_exc()
         finally:
-            session.close() # Siempre cerramos la conexión a la base de datos
-            
-        print(f"\n⏳ Ciclo terminado. Durmiendo por {MINUTOS_REVISION} minutos...")
-        time.sleep(MINUTOS_REVISION * 60) # Pausa el script 
+            session.close()
+
+        # Esperar X minutos antes de la siguiente revisión
+        time.sleep(MINUTOS_REVISION * 60)
 
 if __name__ == "__main__":
     try:
