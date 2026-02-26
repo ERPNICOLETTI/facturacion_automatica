@@ -48,6 +48,11 @@ def calcular_totales(items_meli):
     
     return items_procesados, neto, iva, total
 
+def facturar_orden_nueva(session, client, afip, orden_real, datos_fiscales):
+    """Mapea, guarda en DB, pide CAE y genera el PDF de una orden nueva."""
+    datos_mapeados = map_meli_to_order(orden_real, datos_fiscales)
+    meli_id = datos_mapeados['meli_order_id']
+
     # 1. Determinar tipo de envío (Solo FULL o MADRYN)
     shipping = orden_real.get('shipping', {})
     shipping_mode = shipping.get('mode', '')

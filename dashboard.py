@@ -14,6 +14,10 @@ PDF_DIR = Path(__file__).parent / "PoC_AFIP"
 # Inicializar clientes
 meli = MeliClient()
 
+# Cache para MeLi (para no saturar la API con el refresh del Dashboard)
+cache_meli_user = None
+cache_last_check = 0
+
 @app.route('/')
 def index():
     return render_template('index.html')
@@ -22,8 +26,17 @@ def index():
 def get_stats():
     session = SessionLocal()
     try:
-        # 1. Info de MeLi
-        meli_user = meli.get_my_user_id()
+        # 1. Info de MeLi con Caché (1 minuto)
+        global cache_meli_user, cache_last_check
+        import time
+        ahora = time.time()
+
+        if not cache_meli_user or (ahora - cache_last_check) > 60:
+            cache_meli_user = meli.get_my_user_id()
+            cache_last_check = ahora
+            print("🔄 [Dashboard] API MeLi consultada (Caché actualizada)")
+        
+        meli_user = cache_meli_user
         
         # 2. Resumen de ventas de la DB
         todas = session.query(Orden).all()

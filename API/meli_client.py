@@ -4,11 +4,14 @@ import os
 import time
 
 class MeliClient:
+    # Variable de clase para control de flujo global (pacing)
+    _last_request_time = 0
+
     def __init__(self, token_path=r"C:\Users\Usuario\Desktop\ERP-PINO\Stock ML\tokens.json"):
         self.token_path = token_path
         self.api_url = "https://api.mercadolibre.com"
         self.headers = {
-            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+            "User-Agent": "ERP-PINO-Automation/1.0 (Facturador-Automatico)",
             "Accept": "application/json"
         }
 
@@ -69,7 +72,13 @@ class MeliClient:
         if extra_headers:
             headers.update(extra_headers)
             
-        time.sleep(0.5) # Pausa de seguridad
+        # Control de Rate Limit (Pacing)
+        # Aseguramos un mínimo de 500ms entre cualquier consulta a MeLi
+        tiempo_desde_ultima = time.time() - MeliClient._last_request_time
+        if tiempo_desde_ultima < 0.5:
+            time.sleep(0.5 - tiempo_desde_ultima)
+        
+        MeliClient._last_request_time = time.time()
         
         try:
             response = requests.request(method, url, headers=headers, params=params)
