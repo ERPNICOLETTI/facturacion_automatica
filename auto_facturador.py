@@ -117,6 +117,7 @@ def facturar_existente(session, client, afip, orden_db):
     nro_factura = f"Nº00014-{str(factura_db.id).zfill(8)}"
     
     factura_data = {
+        "titulo_comprobante": "FACTURA",
         "letra_factura": letra,
         "nro_factura": nro_factura,
         "client_name": orden_db.client_name,
@@ -133,7 +134,7 @@ def facturar_existente(session, client, afip, orden_db):
         "iva_contenido": f"$ {iva_contenido:,.2f}".replace(",", "X").replace(".", ",").replace("X", "."),
         "cae": factura_db.cae,
         "cae_expiration": cae_exp_legible,
-        "created_at": datetime.now().strftime("%d/%m/%Y %H:%M"),
+        "created_at": ahora_dt.strftime("%d/%m/%Y %H:%M"),
     }
     
     # 7. Generar y guardar el PDF en carpeta organizada por año/mes
@@ -193,9 +194,37 @@ def emitir_nota_credito(session, client, afip, orden_db):
         folder_path = Path(__file__).parent / "PoC_AFIP" / "FACTURAS" / anio / mes
         folder_path.mkdir(parents=True, exist_ok=True)
         
-        # Guardaríamos el PDF de la NC (lógica similar a la factura)
-        # Por ahora lo registramos en logs
-        print(f"✅ ¡ÉXITO! Nota de Crédito emitida: CAE {res_nc['CAE']}")
+        # Necesitamos la info detallada para el PDF de la NC (items, etc.)
+        orden_real = client.get_order_details(meli_id)
+        items_calc, subtotal_neto, iva_contenido, total = calcular_totales(orden_real.get('order_items', []) if orden_real else [])
+        
+        raw_vto = res_nc['CAEFchVto']
+        vto_legible = f"{raw_vto[6:8]}/{raw_vto[4:6]}/{raw_vto[0:4]}" if len(raw_vto) == 8 else raw_vto
+
+        factura_data = {
+            "titulo_comprobante": "NOTA DE CRÉDITO",
+            "letra_factura": letra_orig,
+            "nro_factura": f"Nº00014-{str(orden_db.id).zfill(8)}",
+            "client_name": orden_db.client_name,
+            "client_address": "Mercado Libre - Reembolso",
+            "client_dni": "-", 
+            "client_email": "-",
+            "client_condicion": "CONSUMIDOR FINAL" if letra_orig == "B" else "RESPONSABLE INSCRIPTO",
+            "condicion_venta": "MercadoPago",
+            "tipo_venta": "Anulación",
+            "orden_compra": str(meli_id),
+            "pages": [{"items": items_calc, "page_num": 1, "total_pages": 1, "is_last": True}],
+            "subtotal_gravado": f"$ {subtotal_neto:,.2f}".replace(",", "X").replace(".", ",").replace("X", "."),
+            "total": f"$ {total:,.2f}".replace(",", "X").replace(".", ",").replace("X", "."),
+            "iva_contenido": f"$ {iva_contenido:,.2f}".replace(",", "X").replace(".", ",").replace("X", "."),
+            "cae": res_nc["CAE"],
+            "cae_expiration": vto_legible,
+            "created_at": ahora_dt.strftime("%d/%m/%Y %H:%M"),
+        }
+        
+        output_path = folder_path / f"nc_{letra_orig}_{meli_id}.pdf"
+        generar_pdf(factura_data, output_path=output_path)
+        print(f"✅ ¡ÉXITO! Nota de Crédito {letra_orig} generada: {output_path.relative_to(Path(__file__).parent)}")
         
     except Exception as e:
         print(f"❌ Error al emitir NC para {meli_id}: {e}")
