@@ -20,7 +20,7 @@ class Orden(Base):
     client_name = Column(String(100), nullable=False)
     total_amount = Column(Float, nullable=False)
     # Evita duplicados y vincula con la API
-    # Nuevos campos para Dashboard
+    meli_order_id = Column(String(50), unique=True, nullable=True)
     shipping_type = Column(String(20), default="NORMAL") # FULL, MADRYN, etc
     status = Column(String(20), default="PENDIENTE")    # FACTURADA, ERROR, PENDIENTE
     error_message = Column(String(255), nullable=True)
