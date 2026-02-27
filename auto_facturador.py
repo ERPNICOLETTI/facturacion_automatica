@@ -96,6 +96,7 @@ def facturar_existente(session, meli_client, tn_client, afip, orden_db):
         mapeo = map_meli_to_order(details, fiscal) if details else None
         if not mapeo: return
         items_mapeados = mapeo['items']
+        dni_cuit = mapeo.get('client_dni', '-')
         address = "Mercado Libre - Envío"
         
         if fiscal and fiscal.get('billing_info'):
@@ -121,6 +122,8 @@ def facturar_existente(session, meli_client, tn_client, afip, orden_db):
             perc_desc = (discount_total / subtotal_products) * 100
             for item in items_mapeados:
                 item['bonificacion'] = round(perc_desc, 2)
+        elif discount_total > 0:
+             print(f"[BOT] Alerta: Hay descuento (${discount_total}) pero el subtotal es 0 o negativo.")
         
         # Lógica de Envío (se agrega como item si el usuario factura envío)
         shipping_cost = mapeo.get('shipping_cost', 0.0)
@@ -177,7 +180,8 @@ def facturar_existente(session, meli_client, tn_client, afip, orden_db):
     ahora_dt = datetime.now()
     raw = factura_db.cae_expiration
     cae_exp_legible = f"{raw[6:8]}/{raw[4:6]}/{raw[0:4]}" if len(raw) == 8 else raw
-    nro_factura = f"Nº00014-{str(factura_db.id).zfill(8)}"
+    # Cambiamos Nº por Nro para evitar errores de codificación en Windows charmap
+    nro_factura = f"Nro00014-{str(factura_db.id).zfill(8)}"
     
     factura_data = {
         "titulo_comprobante": "FACTURA",
@@ -229,8 +233,12 @@ def facturar_existente(session, meli_client, tn_client, afip, orden_db):
     
     # NUEVO: Si es Tiendanube, marcar como empaquetada (packed) para que aparezca en Andreani
     if orden_db.source == "TN":
-        print(f"MARK: Marcando orden TN {ext_id} como empaquetada...")
-        tn_client.mark_as_packed(ext_id)
+        status_actual = details.get('shipping_status', '')
+        if status_actual not in ['packed', 'fulfilled', 'shipped']:
+            print(f"MARK: Marcando orden TN {ext_id} como empaquetada...")
+            tn_client.mark_as_packed(ext_id)
+        else:
+            print(f"SKIP MARK: Orden TN {ext_id} ya está en estado '{status_actual}'.")
 
 def emitir_nota_credito(session, meli_client, tn_client, afip, orden_db):
     """Genera una Nota de Crédito para una orden cancelada/devuelta."""
@@ -295,7 +303,7 @@ def emitir_nota_credito(session, meli_client, tn_client, afip, orden_db):
         factura_data = {
             "titulo_comprobante": "NOTA DE CRÉDITO",
             "letra_factura": letra_orig,
-            "nro_factura": f"Nº00014-{str(orden_db.id).zfill(8)}",
+            "nro_factura": f"Nro00014-{str(orden_db.id).zfill(8)}",
             "client_name": orden_db.client_name,
             "client_address": "Mercado Libre - Reembolso",
             "client_dni": "-", 

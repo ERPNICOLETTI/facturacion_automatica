@@ -26,12 +26,12 @@ def map_meli_to_order(meli_order, fiscal_data=None):
             "descripcion": detalle.get('title'),
             "cantidad": item.get('quantity'),
             "precio_unitario": item.get('unit_price'),
-            "bonificacion": 0 
+            "bonificacion": 0.0
         })
 
     return {
         "client_name": full_name,
-        "total_amount": meli_order.get('total_amount', 0.0),
+        "total_amount": float(meli_order.get('total_amount', 0.0)),
         "meli_order_id": str(meli_order.get('id')),
         "items": items_reales
     }
