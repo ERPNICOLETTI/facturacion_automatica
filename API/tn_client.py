@@ -28,13 +28,13 @@ class TNClient:
         url = f"{self.api_url}/{endpoint}"
         try:
             response = requests.request(method, url, headers=self.headers, params=params, json=data)
-            if response.status_code == 200:
+            if response.status_code in [200, 201]:
                 return response.json()
             else:
-                print(f"⚠️ Error TN API {response.status_code} en {endpoint}: {response.text}")
+                print(f"[TN API] Error {response.status_code} en {endpoint}: {response.text}")
                 return None
         except Exception as e:
-            print(f"❌ Error de conexión con Tiendanube: {e}")
+            print(f"[TN API] Error de conexion con Tiendanube: {e}")
             return None
 
     def get_orders(self, page=1, per_page=50, status=None, updated_at_min=None):
@@ -49,3 +49,7 @@ class TNClient:
 
     def get_order(self, order_id):
         return self._make_request("GET", f"orders/{order_id}")
+
+    def mark_as_packed(self, order_id):
+        """Marca una orden como empaquetada en Tiendanube."""
+        return self._make_request("POST", f"orders/{order_id}/pack")

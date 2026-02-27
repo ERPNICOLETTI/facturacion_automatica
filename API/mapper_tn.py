@@ -31,7 +31,11 @@ def map_tn_to_order(tn_order):
             "bonificacion": 0 
         })
 
-    # 4. Dirección (Manejo de string o dict)
+    # 4. Costos extra y descuentos
+    shipping_cost = float(tn_order.get('shipping_cost_customer', 0.0))
+    discount = float(tn_order.get('discount', 0.0))
+
+    # 5. Dirección (Manejo de string o dict)
     addr_obj = tn_order.get('billing_address') or tn_order.get('shipping_address')
     if isinstance(addr_obj, dict):
         address = f"{addr_obj.get('address', '')}, {addr_obj.get('city', '')}".strip(", ")
@@ -41,11 +45,17 @@ def map_tn_to_order(tn_order):
     return {
         "client_name": full_name,
         "total_amount": float(tn_order.get('total', 0.0)),
+        "subtotal": float(tn_order.get('subtotal', 0.0)),
+        "shipping_cost": shipping_cost,
+        "discount": discount,
         "tn_order_id": str(tn_order.get('id')),
         "items": items_reales,
         "client_dni": dni_cuit,
         "client_email": customer.get('email', '-'),
         "payment_method": payment_method,
         "is_cuit": is_cuit,
-        "address": address
+        "address": address,
+        "tracking_number": tn_order.get('shipping_tracking_number', ''),
+        "carrier": tn_order.get('shipping_carrier_name', ''),
+        "tracking_url": tn_order.get('shipping_tracking_url', '')
     }

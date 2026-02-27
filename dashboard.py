@@ -5,6 +5,7 @@ import os
 import time
 from pathlib import Path
 from API.mapper import map_meli_to_order
+from services.label_scanner import escanear_y_vincular_etiquetas
 
 app = Flask(__name__)
 
@@ -111,6 +112,16 @@ def get_stats():
         return jsonify({"error": str(e)}), 500
     finally:
         session.close()
+
+@app.route('/api/sync-labels', methods=['POST'])
+def sync_labels():
+    try:
+        print("🔄 [Dashboard] Iniciando escaneo de etiquetas...")
+        escanear_y_vincular_etiquetas()
+        return jsonify({"success": True, "message": "Escaneo completado exitosamente."})
+    except Exception as e:
+        print(f"Error sync labels: {e}")
+        return jsonify({"success": False, "error": str(e)}), 500
 
 @app.route('/api/pdf/<filename>')
 def serve_pdf(filename):

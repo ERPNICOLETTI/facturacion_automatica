@@ -16,7 +16,7 @@ class SimuladorAFIP:
     """
 
     def __init__(self):
-        print("[AFIP] Simulador inicializado — modo HOMOLOGACIÓN ficticio.")
+        print("[AFIP] Simulador inicializado - modo HOMOLOGACION ficticio.")
 
     # ── Helpers ───────────────────────────────────────────────────────────────
     @staticmethod

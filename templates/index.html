@@ -266,18 +266,44 @@
             text-decoration: underline;
         }
 
-        @keyframes pulse {
-            0% {
-                opacity: 1;
-            }
-
-            50% {
-                opacity: 0.5;
-            }
-
+        @keyframes spin {
             100% {
-                opacity: 1;
+                transform: rotate(360deg);
             }
+        }
+
+        /* Buscador */
+        .search-container {
+            position: relative;
+            flex: 1;
+            max-width: 400px;
+        }
+
+        .search-input {
+            width: 100%;
+            background: rgba(255, 255, 255, 0.05);
+            border: 1px solid var(--glass-border);
+            padding: 10px 16px 10px 40px;
+            border-radius: 12px;
+            color: white;
+            font-size: 0.9rem;
+            outline: none;
+            transition: all 0.3s ease;
+        }
+
+        .search-input:focus {
+            border-color: var(--accent-primary);
+            background: rgba(255, 255, 255, 0.1);
+            box-shadow: 0 0 0 4px rgba(56, 189, 248, 0.1);
+        }
+
+        .search-icon {
+            position: absolute;
+            left: 14px;
+            top: 50%;
+            transform: translateY(-50%);
+            color: var(--text-dim);
+            font-size: 1.1rem;
         }
     </style>
 </head>
@@ -300,6 +326,9 @@
                 <p id="subtitle-main" style="color:var(--text-dim)">Control Multi-Plataforma (MeLi + Tiendanube)</p>
             </div>
             <div style="display:flex; align-items:center; gap:12px;">
+                <button class="btn-sync" id="btn-sync-labels" onclick="syncLabels()">
+                    <i id="icon-sync" class="ph-bold ph-arrows-clockwise"></i> Sincronizar Etiquetas
+                </button>
                 <div id="meli-status" class="badge" style="background:rgba(255,255,255,0.05)">Conectando MeLi...</div>
             </div>
         </header>
@@ -328,11 +357,19 @@
                 </div>
             </div>
 
-            <div class="filters">
-                <button class="btn-filter active" onclick="setFilter('ALL')">Todas</button>
-                <button class="btn-filter" onclick="setFilter('TN')">Tiendanube</button>
-                <button class="btn-filter" onclick="setFilter('MADRYN')">Madryn (Almacén)</button>
-                <button class="btn-filter" onclick="setFilter('FULL')">Full (MeLi)</button>
+            <div class="filters" style="display: flex; justify-content: space-between; align-items: center; gap: 20px;">
+                <div style="display:flex; gap: 12px;">
+                    <button class="btn-filter active" onclick="setFilter('ALL')">Todas</button>
+                    <button class="btn-filter" onclick="setFilter('TN')">Tiendanube</button>
+                    <button class="btn-filter" onclick="setFilter('MADRYN')">Madryn (Almacén)</button>
+                    <button class="btn-filter" onclick="setFilter('FULL')">Full (MeLi)</button>
+                </div>
+
+                <div class="search-container">
+                    <i class="ph ph-magnifying-glass search-icon"></i>
+                    <input type="text" id="search-input" class="search-input"
+                        placeholder="Buscar por nombre, ID u orden..." oninput="handleSearch(this.value)">
+                </div>
             </div>
 
             <div class="table-container">
@@ -358,7 +395,13 @@
 
     <script>
         let currentFilter = 'ALL';
+        let searchQuery = '';
         let allVentas = [];
+
+        function handleSearch(val) {
+            searchQuery = val.toLowerCase();
+            renderTable();
+        }
 
         function setFilter(filter) {
             currentFilter = filter;
@@ -397,10 +440,20 @@
             body.innerHTML = '';
 
             let filtered = allVentas;
+
+            // 1. Filtrar por búsqueda
+            if (searchQuery) {
+                filtered = filtered.filter(v =>
+                    v.cliente.toLowerCase().includes(searchQuery) ||
+                    v.id.toString().toLowerCase().includes(searchQuery)
+                );
+            }
+
+            // 2. Filtrar por solapa (Plataforma)
             if (currentFilter === 'TN') {
-                filtered = allVentas.filter(v => v.source === 'TN');
+                filtered = filtered.filter(v => v.source === 'TN');
             } else if (currentFilter === 'MADRYN' || currentFilter === 'FULL') {
-                filtered = allVentas.filter(v => v.tipo === currentFilter && v.source === 'MELI');
+                filtered = filtered.filter(v => v.tipo === currentFilter && v.source === 'MELI');
             }
 
             filtered.forEach(v => {
@@ -426,6 +479,32 @@
                 `;
                 body.appendChild(row);
             });
+        }
+
+        async function syncLabels() {
+            const btn = document.getElementById('btn-sync-labels');
+            const icon = document.getElementById('icon-sync');
+
+            btn.disabled = true;
+            icon.classList.add('animate-spin');
+
+            try {
+                const res = await fetch('/api/sync-labels', { method: 'POST' });
+                const data = await res.json();
+
+                if (data.success) {
+                    alert("✅ " + data.message);
+                } else {
+                    alert("❌ Error: " + data.error);
+                }
+            } catch (e) {
+                console.error(e);
+                alert("❌ Error de conexión al sincronizar.");
+            } finally {
+                btn.disabled = false;
+                icon.classList.remove('animate-spin');
+                loadData();
+            }
         }
 
         loadData();
